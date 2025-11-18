@@ -3,13 +3,14 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Organization } from '@/types';
 
 export default function CompanyDashboard() {
   const { userProfile, loading, signOut } = useAuth();
   const [organization, setOrganization] = useState<Organization | null>(null);
+  const [staffCount, setStaffCount] = useState<number>(0);
   const router = useRouter();
 
   useEffect(() => {
@@ -39,19 +40,37 @@ export default function CompanyDashboard() {
       }
     };
 
+    const fetchStaffCount = async () => {
+      if (userProfile?.currentOrganizationId) {
+        try {
+          // 組織に所属しているユーザーを取得（削除済みを除外）
+          const usersQuery = query(
+            collection(db, 'users'),
+            where('organizationIds', 'array-contains', userProfile.currentOrganizationId)
+          );
+          const usersSnapshot = await getDocs(usersQuery);
+          
+          // 削除済みユーザーを除外してカウント
+          const activeUsers = usersSnapshot.docs.filter(doc => {
+            const data = doc.data();
+            return !data.deleted;
+          });
+          
+          setStaffCount(activeUsers.length);
+        } catch (error) {
+          console.error('[Company Dashboard] Error fetching staff count:', error);
+          setStaffCount(0);
+        }
+      }
+    };
+
     fetchOrganization();
+    fetchStaffCount();
   }, [userProfile]);
 
   const handleSignOut = async () => {
     await signOut();
     router.push('/');
-  };
-
-  const copyOrganizationId = () => {
-    if (userProfile?.currentOrganizationId) {
-      navigator.clipboard.writeText(userProfile.currentOrganizationId);
-      alert('企業IDをコピーしました');
-    }
   };
 
   if (loading) {
@@ -91,25 +110,6 @@ export default function CompanyDashboard() {
 
       {/* メインコンテンツ */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* 企業ID表示 */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-          <h3 className="text-sm font-semibold text-blue-900 mb-2">企業ID（アルバイトに共有）</h3>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 bg-white px-3 py-2 rounded border border-blue-300 text-blue-900 font-mono text-sm">
-              {userProfile.currentOrganizationId}
-            </code>
-            <button
-              onClick={copyOrganizationId}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition text-sm"
-            >
-              コピー
-            </button>
-          </div>
-          <p className="text-xs text-blue-700 mt-2">
-            ※ このIDをアルバイトに共有して、組織に参加してもらってください
-          </p>
-        </div>
-
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {/* スタッフ管理カード */}
           <div className="bg-white rounded-lg shadow p-6">
@@ -142,7 +142,7 @@ export default function CompanyDashboard() {
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">タイムカード管理</h2>
             <p className="text-gray-600 mb-4">出退勤の記録を確認</p>
-            <button className="w-full px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition">
+            <button onClick={() => router.push('/timecards')} className="w-full px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition">
               記録を見る
             </button>
           </div>
@@ -151,7 +151,7 @@ export default function CompanyDashboard() {
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">レポート</h2>
             <p className="text-gray-600 mb-4">労働時間・給与の集計</p>
-            <button className="w-full px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 transition">
+            <button onClick={() => router.push('/report')} className="w-full px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 transition">
               レポート
             </button>
           </div>
@@ -170,7 +170,7 @@ export default function CompanyDashboard() {
         <div className="mt-8 grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-white rounded-lg shadow p-4">
             <p className="text-sm text-gray-600 mb-1">登録スタッフ数</p>
-            <p className="text-2xl font-bold text-gray-900">0名</p>
+            <p className="text-2xl font-bold text-gray-900">{staffCount}名</p>
           </div>
           <div className="bg-white rounded-lg shadow p-4">
             <p className="text-sm text-gray-600 mb-1">今月のシフト</p>

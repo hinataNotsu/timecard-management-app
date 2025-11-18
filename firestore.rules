@@ -93,8 +93,8 @@ service cloud.firestore {
 
       // 組織配下: メンバー個別設定（例: 交通費）
       match /members/{userId} {
-        // 読み取り: 管理者かつ同一組織のメンバー、削除済みでない場合のみ
-        allow read: if signedIn() && isNotDeleted() && isMember(organizationId) && isManage();
+        // 読み取り: 同一組織のメンバー かつ (管理者 または 本人) / 削除済みでない
+        allow read: if signedIn() && isNotDeleted() && isMember(organizationId) && (isManage() || request.auth.uid == userId);
         // 書き込み: 管理者かつ同一組織のメンバー、削除済みでない場合のみ
         allow create, update, delete: if signedIn() && isNotDeleted() && isMember(organizationId) && isManage();
       }

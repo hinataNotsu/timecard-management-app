@@ -11,6 +11,10 @@ export interface User {
   phoneNumber?: string; // 電話番号
   birthDate?: string; // 生年月日
   address?: string; // 住所
+  deleted?: boolean; // 削除済みフラグ
+  deletedAt?: Timestamp; // 削除日時
+  requirePasswordChange?: boolean; // パスワード変更が必要
+  profileCompleted?: boolean; // 初回プロフィール登録が完了しているか
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

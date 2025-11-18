@@ -19,15 +19,46 @@ export default function PartTimeLoginPage() {
     setLoading(true);
 
     try {
-      await signIn(email, password);
-      window.location.href = '/dashboard/part-time';
+      console.log('[Login] Attempting login for:', email);
+      const userCredential = await signIn(email, password);
+      const user = userCredential.user;
+      console.log('[Login] Login successful, user:', user.uid);
+      
+      // Firestoreからユーザー情報を取得してrequirePasswordChangeをチェック
+      const { doc, getDoc } = await import('firebase/firestore');
+      const { db } = await import('@/lib/firebase');
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      
+      if (!userDoc.exists()) {
+        console.error('[Login] User document not found in Firestore');
+        setError('ユーザー情報が見つかりません。管理者に連絡してください。');
+        return;
+      }
+      
+      const userData = userDoc.data();
+      console.log('[Login] User data:', userData);
+      
+      if (userData?.requirePasswordChange) {
+        console.log('[Login] Password change required, redirecting to profile');
+        // パスワード変更が必要な場合はプロフィール画面へ
+        router.push('/profile?passwordChangeRequired=true');
+      } else if (!userData?.profileCompleted) {
+        console.log('[Login] Profile onboarding required, redirecting to profile');
+        router.push('/profile');
+      } else {
+        console.log('[Login] Redirecting to dashboard');
+        window.location.href = '/dashboard/part-time';
+      }
     } catch (err: any) {
+      console.error('[Login] Error:', err);
       if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
         setError('メールアドレスまたはパスワードが正しくありません');
       } else if (err.code === 'auth/invalid-email') {
         setError('メールアドレスの形式が正しくありません');
+      } else if (err.code === 'auth/invalid-credential') {
+        setError('認証情報が無効です。メールアドレスとパスワードを確認してください');
       } else {
-        setError('ログインに失敗しました');
+        setError(`ログインに失敗しました: ${err.message || err.code || '不明なエラー'}`);
       }
     } finally {
       setLoading(false);
@@ -41,12 +72,6 @@ export default function PartTimeLoginPage() {
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
             アルバイトログイン
           </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            アカウントをお持ちでない方は{' '}
-            <Link href="/signup/part-time" className="font-medium text-blue-600 hover:text-blue-500">
-              新規登録
-            </Link>
-          </p>
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           {error && (

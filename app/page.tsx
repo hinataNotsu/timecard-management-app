@@ -45,12 +45,7 @@ export default function Home() {
               >
                 ログイン
               </Link>
-              <Link
-                href="/signup/part-time"
-                className="block w-full px-6 py-3 bg-white text-blue-600 text-center rounded-lg font-semibold border-2 border-blue-600 hover:bg-blue-50 transition"
-              >
-                新規登録
-              </Link>
+              <p className="text-sm text-gray-500 text-center">アカウント作成は管理者が行います</p>
             </div>
           </div>
 

@@ -199,15 +199,18 @@ export default function PartTimePayrollPage() {
   };
 
   const summary = useMemo(() => {
-    let count = 0, totalMin = 0, nightMin = 0, overtimeMin = 0;
+    // 承認済みのみ集計
+    const approved = timecards.filter(t => t.status === 'approved');
+    const uniqueDays = new Set<string>();
+    let totalMin = 0, nightMin = 0, overtimeMin = 0;
     let base = 0, night = 0, overtime = 0, holiday = 0, transport = 0, total = 0;
-    for (const s of timecards) {
-      count++;
+    for (const s of approved) {
+      uniqueDays.add(s.dateKey);
       const bd = calcBreakdown(s);
       totalMin += bd.totalMin; nightMin += bd.nightMin; overtimeMin += bd.overtimeMin;
       base += bd.base; night += bd.night; overtime += bd.overtime; holiday += bd.holiday; transport += bd.transport; total += bd.total;
     }
-    return { count, totalMin, nightMin, overtimeMin, base, night, overtime, holiday, transport, total };
+    return { days: uniqueDays.size, totalMin, nightMin, overtimeMin, base, night, overtime, holiday, transport, total, approvedCount: approved.length };
   }, [timecards, orgSettings, transportPerShift]);
 
   const exportCsv = () => {
@@ -357,7 +360,7 @@ export default function PartTimePayrollPage() {
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
           <div className="bg-white rounded-lg shadow p-4">
             <p className="text-sm text-gray-600 mb-1">出勤日数</p>
-            <p className="text-2xl font-bold text-gray-900">{summary.count}日</p>
+            <p className="text-2xl font-bold text-gray-900">{summary.days}日</p>
           </div>
           <div className="bg-white rounded-lg shadow p-4">
             <p className="text-sm text-gray-600 mb-1">総労働時間</p>
@@ -432,7 +435,7 @@ export default function PartTimePayrollPage() {
             {!loading && timecards.length > 0 && (
               <tfoot>
                 <tr className="bg-gray-100 font-semibold">
-                  <td className="p-2 border-t text-center">合計</td>
+                  <td className="p-2 border-t text-center">承認済み合計</td>
                   <td className="p-2 border-t text-center" colSpan={4}></td>
                   <td className="p-2 border-t text-center">{summary.totalMin}</td>
                   <td className="p-2 border-t text-center">{summary.nightMin}</td>

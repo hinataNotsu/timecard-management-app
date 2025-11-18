@@ -69,11 +69,14 @@ function AddOrganizationForm() {
         currentOrganizationId: inputId,
       });
 
-      // membersサブコレクションにデフォルト設定を作成
+      // membersサブコレクションにデフォルト設定を作成（時給は組織デフォルトを反映）
       try {
         if (userProfile?.uid) {
+          const defWage = (orgData as any)?.defaultHourlyWage;
+          const parsedWage = typeof defWage === 'number' ? defWage : (Number(defWage) || null);
           await setDoc(doc(db, 'organizations', inputId, 'members', userProfile.uid), {
             transportAllowancePerShift: 0,
+            hourlyWage: parsedWage,
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
           });

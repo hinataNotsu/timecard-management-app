@@ -23,6 +23,13 @@ export default function OrganizationMembersPage() {
   const [rows, setRows] = useState<MemberRow[]>([]);
   const [saving, setSaving] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  
+  // ユーザー追加用
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserDisplayName, setNewUserDisplayName] = useState('');
+  const [adding, setAdding] = useState(false);
 
   const orgId = userProfile?.currentOrganizationId;
 
@@ -43,6 +50,16 @@ export default function OrganizationMembersPage() {
         const uq = query(collection(db, 'users'), where('organizationIds', 'array-contains', orgId));
         const usnap = await getDocs(uq);
 
+        // 組織デフォルト時給を取得
+        let orgDefaultWage: number | null = null;
+        try {
+          const orgSnap = await getDoc(doc(db, 'organizations', orgId));
+          if (orgSnap.exists()) {
+            const dw = (orgSnap.data() as any).defaultHourlyWage;
+            orgDefaultWage = typeof dw === 'number' ? dw : (Number(dw) || null);
+          }
+        } catch {}
+
         // メンバー個別設定を取得
         const memberSnap = await getDocs(collection(db, 'organizations', orgId, 'members'));
         const settingsMap = new Map<string, { transport?: number; wage?: number }>();
@@ -62,6 +79,7 @@ export default function OrganizationMembersPage() {
             try {
               await setDoc(doc(db, 'organizations', orgId, 'members', userId), {
                 transportAllowancePerShift: 0,
+                hourlyWage: orgDefaultWage,
                 createdAt: Timestamp.now(),
                 updatedAt: Timestamp.now(),
               });
@@ -120,27 +138,89 @@ export default function OrganizationMembersPage() {
 
   const removeFromOrg = async (uid: string, displayName: string) => {
     if (!orgId) return;
-    if (!confirm(`${displayName} を組織から削除しますか？\n\n※ ユーザーアカウント自体は削除されず、この組織へのアクセス権のみが削除されます。`)) return;
+    if (!confirm(`${displayName} を完全に削除しますか？\n\n※ ユーザーアカウント自体も削除され、ログインできなくなります。\n※ 過去のシフトやタイムカードは記録として残ります。`)) return;
     
     setRemoving(uid);
     try {
-      // users/{uid} から organizationIds を削除
-      await updateDoc(doc(db, 'users', uid), {
-        organizationIds: arrayRemove(orgId),
-        updatedAt: Timestamp.now(),
+      // API経由で削除（Admin SDKを使用）
+      const response = await fetch('/api/admin/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetUid: uid,
+          adminUid: userProfile?.uid,
+          organizationId: orgId,
+        }),
       });
 
-      // メンバー設定も削除
-      await deleteDoc(doc(db, 'organizations', orgId, 'members', uid));
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'ユーザーの削除に失敗しました');
+      }
 
       // UI から削除
       setRows(prev => prev.filter(r => r.uid !== uid));
-      alert('組織から削除しました');
-    } catch (e) {
+      alert('ユーザーを削除しました');
+    } catch (e: any) {
       console.error('[Members] remove error', e);
-      alert('削除に失敗しました');
+      alert(e.message || 'ユーザーの削除に失敗しました');
     } finally {
       setRemoving(null);
+    }
+  };
+
+  const handleAddUser = async () => {
+    if (!orgId || !userProfile?.uid) return;
+    
+    if (!newUserEmail || !newUserPassword) {
+      alert('メールアドレスとパスワードを入力してください');
+      return;
+    }
+    
+    if (newUserPassword.length < 6) {
+      alert('パスワードは6文字以上で入力してください');
+      return;
+    }
+    
+    setAdding(true);
+    try {
+      // API経由でユーザー作成（Admin SDKを使用）
+      const response = await fetch('/api/admin/create-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: newUserEmail,
+          password: newUserPassword,
+          displayName: newUserDisplayName || newUserEmail.split('@')[0],
+          organizationId: orgId,
+          createdByUid: userProfile.uid,
+        }),
+      });
+
+      const result = await response.json();
+      
+      if (!response.ok) {
+        const errorMsg = result.error || 'ユーザーの作成に失敗しました';
+        const details = result.details ? `\n\n詳細: ${result.details}` : '';
+        throw new Error(errorMsg + details);
+      }
+
+      alert(`ユーザーを作成しました\n\nメール: ${result.email}\n初回ログイン後にパスワード変更を促します。`);
+      
+      // フォームをリセット
+      setNewUserEmail('');
+      setNewUserPassword('');
+      setNewUserDisplayName('');
+      setShowAddUser(false);
+      
+      // リロード
+      window.location.reload();
+    } catch (e: any) {
+      console.error('[Members] add user error', e);
+      alert(e.message || 'ユーザーの作成に失敗しました');
+    } finally {
+      setAdding(false);
     }
   };
 
@@ -154,9 +234,78 @@ export default function OrganizationMembersPage() {
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-5xl mx-auto px-4 py-6">
         <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl font-bold">メンバー管理</h1>
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold">メンバー管理</h1>
+            <button
+              onClick={() => setShowAddUser(!showAddUser)}
+              className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+            >
+              {showAddUser ? 'キャンセル' : '+ ユーザー追加'}
+            </button>
+          </div>
           <button onClick={() => router.push('/dashboard/company')} className="text-sm text-gray-600 hover:text-gray-900">← ダッシュボード</button>
         </div>
+
+        {showAddUser && (
+          <div className="mb-6 bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-semibold mb-4">新規ユーザー追加</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">メールアドレス *</label>
+                <input
+                  type="email"
+                  value={newUserEmail}
+                  onChange={(e) => setNewUserEmail(e.target.value)}
+                  className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="example@company.com"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">初期パスワード *（6文字以上）</label>
+                <input
+                  type="password"
+                  value={newUserPassword}
+                  onChange={(e) => setNewUserPassword(e.target.value)}
+                  className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="初期パスワード"
+                />
+                <p className="mt-1 text-xs text-gray-500">※ ユーザーには初回ログイン時にパスワード変更を促します</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">表示名（任意）</label>
+                <input
+                  type="text"
+                  value={newUserDisplayName}
+                  onChange={(e) => setNewUserDisplayName(e.target.value)}
+                  className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="山田 太郎"
+                                  maxLength={30}
+                />
+                <p className="mt-1 text-xs text-gray-500">※ 空欄の場合はメールアドレスから自動生成されます</p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleAddUser}
+                  disabled={adding}
+                  className={`flex-1 px-4 py-2 rounded ${adding ? 'bg-gray-300 text-gray-600' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                >
+                  {adding ? '作成中...' : 'ユーザーを作成'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowAddUser(false);
+                    setNewUserEmail('');
+                    setNewUserPassword('');
+                    setNewUserDisplayName('');
+                  }}
+                  className="px-4 py-2 rounded bg-gray-200 text-gray-700 hover:bg-gray-300"
+                >
+                  キャンセル
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="bg-white rounded-lg shadow overflow-hidden">
           <table className="w-full text-sm">
@@ -222,7 +371,7 @@ export default function OrganizationMembersPage() {
                         onClick={() => removeFromOrg(r.uid, r.displayName)}
                         disabled={removing === r.uid}
                         className={`px-3 py-1 rounded text-sm ${removing === r.uid ? 'bg-gray-300 text-gray-500' : 'bg-red-600 text-white hover:bg-red-700'}`}
-                      >{removing === r.uid ? '削除中' : '組織から削除'}</button>
+                      >{removing === r.uid ? '削除中' : 'ユーザー削除'}</button>
                     </td>
                   </tr>
                 ))

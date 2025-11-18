@@ -390,6 +390,12 @@ export default function ShiftSubmitPage() {
     const shift = shifts.find((s) => s.id === shiftId);
     if (!shift) return;
 
+    // 承認済み・却下済みのシフトは削除不可
+    if (shift.status === 'approved' || shift.status === 'rejected') {
+      alert('このシフトは承認済みまたは却下済みのため削除できません');
+      return;
+    }
+
     if (!canSubmitForDate(new Date(shift.date))) {
       alert('この日のシフトは締切を過ぎているため削除できません');
       return;
@@ -906,12 +912,18 @@ export default function ShiftSubmitPage() {
                     >
                       更新
                     </button>
-                    <button
-                      onClick={() => handleDeleteShift(editingId)}
-                      className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
-                    >
-                      削除
-                    </button>
+                    {(() => {
+                      const shift = shifts.find(s => s.id === editingId);
+                      const canDelete = shift && shift.status !== 'approved' && shift.status !== 'rejected';
+                      return canDelete ? (
+                        <button
+                          onClick={() => handleDeleteShift(editingId)}
+                          className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+                        >
+                          削除
+                        </button>
+                      ) : null;
+                    })()}
                   </>
                 ) : (
                   <button

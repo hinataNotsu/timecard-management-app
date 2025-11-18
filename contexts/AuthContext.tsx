@@ -39,10 +39,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
         if (userDoc.exists()) {
           const profile = userDoc.data() as User;
+          
+          // 削除済みユーザーの場合はログアウト
+          if (profile.deleted) {
+            console.warn('[AuthContext] User account is deleted');
+            await firebaseSignOut(auth);
+            alert('このアカウントは削除されています');
+            setUserProfile(null);
+            setLoading(false);
+            return;
+          }
+          
           console.log('[AuthContext] User profile loaded:', profile);
           setUserProfile(profile);
         } else {
-          console.log('[AuthContext] User profile not found in Firestore');
+          console.error('[AuthContext] User profile not found in Firestore for uid:', firebaseUser.uid);
+          // Firestoreにドキュメントがない場合はログアウト
+          await firebaseSignOut(auth);
+          alert('ユーザー情報が見つかりません。管理者に連絡してください。');
+          setUserProfile(null);
         }
       } else {
         console.log('[AuthContext] User logged out');
