@@ -40,40 +40,47 @@ export default function CompanySignUpPage() {
 
     try {
       console.log('[Company Signup] Starting registration...');
-      
-      // ユーザー登録
+      // 1. Firebase Authでユーザー作成
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const userId = userCredential.user.uid;
       console.log('[Company Signup] User created:', userId);
 
-      // 組織を作成
+      // 2. Firestoreにユーザードキュメント仮作成（organizationIds: []）
+      await setDoc(doc(db, 'users', userId), {
+        uid: userId,
+        email,
+        organizationIds: [],
+        currentOrganizationId: '',
+        isManage: true,
+        displayName: companyName.trim(),
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+      console.log('[Company Signup] User profile (empty org) saved');
+
+      // 3. Firestoreにorganizationドキュメント作成
       const orgId = crypto.randomUUID();
-      const orgRef = doc(db, 'organizations', orgId);
-      const orgData: Organization = {
+      await setDoc(doc(db, 'organizations', orgId), {
         id: orgId,
         name: companyName.trim(),
         createdBy: userId,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
-      };
-
-      await setDoc(orgRef, orgData);
+      });
       console.log('[Company Signup] Organization created:', orgId);
 
-      // Firestoreにユーザー情報を保存（組織IDと管理者権限を含む）
-      const userData: User = {
+      // 4. Firestoreのuserドキュメントを更新（organizationIdsにorgId追加）
+      await setDoc(doc(db, 'users', userId), {
         uid: userId,
-        email: email,
+        email,
         organizationIds: [orgId],
         currentOrganizationId: orgId,
         isManage: true,
         displayName: companyName.trim(),
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
-      };
-
-      await setDoc(doc(db, 'users', userId), userData);
-      console.log('[Company Signup] User profile saved');
+      }, { merge: true });
+      console.log('[Company Signup] User profile updated with orgId');
 
       // membersサブコレクションにデフォルト設定を作成
       try {
@@ -89,8 +96,11 @@ export default function CompanySignUpPage() {
 
       // ページをリロードしてAuthContextに最新のユーザー情報を読み込ませる
       console.log('[Company Signup] Reloading page to refresh auth state...');
-      window.location.href = '/dashboard/company';
+      setTimeout(() => {
+        window.location.href = '/dashboard/company';
+      }, 700);
     } catch (err: any) {
+      console.error('[Company Signup] signUp failed:', err);
       if (err.code === 'auth/email-already-in-use') {
         setError('このメールアドレスは既に使用されています');
       } else if (err.code === 'auth/invalid-email') {

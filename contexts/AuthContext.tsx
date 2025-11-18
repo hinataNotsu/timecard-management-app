@@ -8,7 +8,7 @@ import {
   signOut as firebaseSignOut,
   onAuthStateChanged
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, Timestamp, collection, addDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { User } from '@/types';
 
@@ -71,20 +71,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signUp = async (email: string, password: string, isManage: boolean) => {
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    
-    // Firestoreにユーザー情報を保存
-    const userData: User = {
-      uid: userCredential.user.uid,
-      email: email,
-      organizationIds: [],
-      isManage: isManage,
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
-    };
-    
-    await setDoc(doc(db, 'users', userCredential.user.uid), userData);
-    setUserProfile(userData);
+    console.log('[AuthContext] signUp called', { email, isManage });
+    try {
+      console.log('[AuthContext] Step 1: Creating Firebase Auth user...');
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      console.log('[AuthContext] Step 1: ✓ Auth user created:', userCredential.user.uid);
+
+      console.log('[AuthContext] Step 1.5: Waiting for auth token to refresh...');
+      await userCredential.user.getIdToken(true);
+      console.log('[AuthContext] Step 1.5: ✓ Auth token refreshed');
+
+      // 2. Firestoreにユーザードキュメント作成
+      const uid = userCredential.user.uid;
+      const userData = {
+        uid,
+        email,
+        organizationIds: [],
+        isManage,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      };
+      console.log('[AuthContext] Step 2: setDoc (user) called:', userData);
+      await setDoc(doc(db, 'users', uid), userData);
+      console.log('[AuthContext] Step 2: ✓ Firestore user document created:', uid);
+
+      // 3. Firestoreにorganizationsコレクション作成（仮名: "新規組織"）
+      const orgData = {
+        name: '新規組織',
+        ownerUid: uid,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      };
+      console.log('[AuthContext] Step 3: addDoc (organization) called:', orgData);
+      const orgRef = await addDoc(collection(db, 'organizations'), orgData);
+      console.log('[AuthContext] Step 3: ✓ Firestore organization document created:', orgRef.id);
+
+      // 4. userData.organizationIdsにorgRef.idを追加して再度setDoc
+      const updatedUserData = {
+        ...userData,
+        organizationIds: [orgRef.id],
+        updatedAt: Timestamp.now(),
+      };
+      console.log('[AuthContext] Step 4: setDoc (user orgIds) called:', updatedUserData);
+      await setDoc(doc(db, 'users', uid), updatedUserData);
+      console.log('[AuthContext] Step 4: ✓ User organizationIds updated:', orgRef.id);
+
+      setUserProfile(updatedUserData);
+      console.log('[AuthContext] ✓ signUp completed successfully');
+    } catch (error: any) {
+      console.error('[AuthContext] ✗ signUp failed:', error);
+      console.error('[AuthContext] Error code:', error?.code);
+      console.error('[AuthContext] Error message:', error?.message);
+      throw error;
+    }
   };
 
   const signIn = async (email: string, password: string) => {
@@ -99,16 +138,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const updateUserProfile = async (updates: Partial<User>) => {
     if (!user) throw new Error('ユーザーがログインしていません');
     
+    console.log('[AuthContext] updateUserProfile called');
+    console.log('[AuthContext] User UID:', user.uid);
+    console.log('[AuthContext] Updates:', updates);
+    
     const updatedData = {
       ...updates,
       updatedAt: Timestamp.now(),
     };
     
-    await setDoc(doc(db, 'users', user.uid), updatedData, { merge: true });
+    console.log('[AuthContext] Writing to users/' + user.uid);
+    try {
+      await setDoc(doc(db, 'users', user.uid), updatedData, { merge: true });
+      console.log('[AuthContext] ✓ setDoc completed successfully');
+    } catch (err) {
+      console.error('[AuthContext] ✗ setDoc failed:', err);
+      throw err;
+    }
     
     // ローカル状態を更新
     if (userProfile) {
       setUserProfile({ ...userProfile, ...updatedData } as User);
+      console.log('[AuthContext] ✓ Local state updated');
     }
   };
 

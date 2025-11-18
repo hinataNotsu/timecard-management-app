@@ -38,56 +38,78 @@ function AddOrganizationForm() {
 
     try {
       const inputId = organizationId.trim();
-      console.log('[Add Organization] Input ID:', inputId);
+      console.log('[Add Organization] Step 1: Input ID:', inputId);
+      console.log('[Add Organization] Step 1: Current user:', userProfile?.uid);
+      console.log('[Add Organization] Step 1: Current organizationIds:', userProfile?.organizationIds);
       
       // 組織が存在するか確認
+      console.log('[Add Organization] Step 2: Checking organization existence...');
       const orgDocRef = doc(db, 'organizations', inputId);
       const orgDoc = await getDoc(orgDocRef);
       
       if (!orgDoc.exists()) {
-        console.log('[Add Organization] Organization not found');
+        console.log('[Add Organization] Step 2: Organization not found');
         setError('入力された企業IDが見つかりません。正しいIDを入力してください。');
         setLoading(false);
         return;
       }
 
       const orgData = orgDoc.data();
-      console.log('[Add Organization] Organization data:', orgData);
+      console.log('[Add Organization] Step 2: Organization found:', orgData?.name);
 
       // 既に所属している場合はスキップ
       const currentOrgIds = userProfile?.organizationIds || [];
       if (currentOrgIds.includes(inputId)) {
+        console.log('[Add Organization] Step 3: Already a member');
         setError('既にこの組織に所属しています');
         setLoading(false);
         return;
       }
 
       // ユーザープロフィールに組織IDを追加
-      console.log('[Add Organization] Updating user profile...');
-      await updateUserProfile({
-        organizationIds: [...currentOrgIds, inputId],
-        currentOrganizationId: inputId,
-      });
+      console.log('[Add Organization] Step 3: Updating user profile to users collection...');
+      console.log('[Add Organization] Step 3: New organizationIds:', [...currentOrgIds, inputId]);
+      try {
+        await updateUserProfile({
+          organizationIds: [...currentOrgIds, inputId],
+          currentOrganizationId: inputId,
+        });
+        console.log('[Add Organization] Step 3: ✓ User profile updated successfully');
+      } catch (err) {
+        console.error('[Add Organization] Step 3: ✗ User profile update failed:', err);
+        throw err;
+      }
 
       // membersサブコレクションにデフォルト設定を作成（時給は組織デフォルトを反映）
+      console.log('[Add Organization] Step 4: Creating member document...');
+      console.log('[Add Organization] Step 4: Path: organizations/' + inputId + '/members/' + userProfile?.uid);
       try {
         if (userProfile?.uid) {
           const defWage = (orgData as any)?.defaultHourlyWage;
           const parsedWage = typeof defWage === 'number' ? defWage : (Number(defWage) || null);
+          console.log('[Add Organization] Step 4: Member data:', {
+            transportAllowancePerShift: 0,
+            hourlyWage: parsedWage,
+            userId: userProfile.uid,
+          });
+          
           await setDoc(doc(db, 'organizations', inputId, 'members', userProfile.uid), {
             transportAllowancePerShift: 0,
             hourlyWage: parsedWage,
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
           });
-          console.log('[Add Organization] Member document created');
+          console.log('[Add Organization] Step 4: ✓ Member document created successfully');
         }
-      } catch (err) {
-        console.warn('[Add Organization] Failed to create member document:', err);
+      } catch (err: any) {
+        console.error('[Add Organization] Step 4: ✗ Member document creation failed:', err);
+        console.error('[Add Organization] Step 4: Error code:', err?.code);
+        console.error('[Add Organization] Step 4: Error message:', err?.message);
+        throw err; // エラーを上位に伝播させる
       }
 
-      console.log('[Add Organization] Profile updated successfully, redirecting...');
-      console.log('[Add Organization] Return to:', returnTo);
+      console.log('[Add Organization] Step 5: All operations completed, redirecting...');
+      console.log('[Add Organization] Step 5: Return to:', returnTo);
       
       // returnToパラメータに基づいてリダイレクト
       if (returnTo === 'company') {

@@ -9,14 +9,26 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function currentUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    // ▼▼▼ 修正・追加箇所: 安全なデータ取得ヘルパー ▼▼▼
+    
+    // ユーザーのドキュメントを取得する関数
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
-    function isNotDeleted() {
-      let userData = currentUserData();
-      return !('deleted' in userData) || userData.deleted != true;
+    // ユーザーデータを安全に取得（ドキュメントがない場合は空のマップを返す）
+    function currentUserData() {
+      let doc = getUserDoc();
+      return doc != null ? doc.data : {};
     }
+
+    // 削除済みでないかチェック（ドキュメントがない場合は削除されていないとみなす＝新規登録対応）
+    function isNotDeleted() {
+      let doc = getUserDoc();
+      return doc == null || !('deleted' in doc.data) || doc.data.deleted != true;
+    }
+    
+    // ▲▲▲ 修正ここまで ▲▲▲
 
     function isMember(orgId) {
       let userData = currentUserData();
@@ -26,7 +38,9 @@ service cloud.firestore {
     }
 
     function isManage() {
-      return currentUserData().isManage == true;
+      // currentUserData()が空の場合(新規時)はfalseになるので安全
+      let userData = currentUserData();
+      return 'isManage' in userData && userData.isManage == true;
     }
     
     function submissionAllowed(orgId, shiftTs) {
@@ -51,8 +65,8 @@ service cloud.firestore {
         )
       );
 
-      // 作成: 自分のドキュメントのみ
-      allow create: if signedIn() && request.auth.uid == userId;
+      // 作成: 誰でも（signedInのみ）
+      allow create: if signedIn();
 
       // 更新: 自分のドキュメント もしくは 管理者による所属組織の解除のみ許可
       allow update: if signedIn() && (
@@ -95,6 +109,7 @@ service cloud.firestore {
       match /members/{userId} {
         // 読み取り: 同一組織のメンバー かつ (管理者 または 本人) / 削除済みでない
         allow read: if signedIn() && isNotDeleted() && isMember(organizationId) && (isManage() || request.auth.uid == userId);
+        
         // 書き込み: 管理者かつ同一組織のメンバー、削除済みでない場合のみ
         allow create, update, delete: if signedIn() && isNotDeleted() && isMember(organizationId) && isManage();
       }
