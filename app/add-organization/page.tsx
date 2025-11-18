@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import Link from 'next/link';
 
@@ -68,6 +68,20 @@ function AddOrganizationForm() {
         organizationIds: [...currentOrgIds, inputId],
         currentOrganizationId: inputId,
       });
+
+      // membersサブコレクションにデフォルト設定を作成
+      try {
+        if (userProfile?.uid) {
+          await setDoc(doc(db, 'organizations', inputId, 'members', userProfile.uid), {
+            transportAllowancePerShift: 0,
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now(),
+          });
+          console.log('[Add Organization] Member document created');
+        }
+      } catch (err) {
+        console.warn('[Add Organization] Failed to create member document:', err);
+      }
 
       console.log('[Add Organization] Profile updated successfully, redirecting...');
       console.log('[Add Organization] Return to:', returnTo);

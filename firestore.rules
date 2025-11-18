@@ -13,6 +13,11 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    function isNotDeleted() {
+      let userData = currentUserData();
+      return !('deleted' in userData) || userData.deleted != true;
+    }
+
     function isMember(orgId) {
       let userData = currentUserData();
       return 'organizationIds' in userData &&
@@ -35,7 +40,7 @@ service cloud.firestore {
     // ユーザーコレクション
     match /users/{userId} {
       // 読み取り: 自分 or （同一組織のメンバーのユーザー）
-      allow read: if signedIn() && (
+      allow read: if signedIn() && isNotDeleted() && (
         request.auth.uid == userId || (
           // 対象ユーザーの所属組織に、現在ユーザーのcurrentOrganizationIdが含まれている
           ('organizationIds' in resource.data) &&
@@ -51,10 +56,11 @@ service cloud.firestore {
 
       // 更新: 自分のドキュメント もしくは 管理者による所属組織の解除のみ許可
       allow update: if signedIn() && (
-        // 自分自身の更新は許可
-        request.auth.uid == userId || (
+        // 自分自身の更新は許可（削除済みでない場合のみ）
+        (request.auth.uid == userId && isNotDeleted()) || (
           // 管理者による、現在の組織からターゲットユーザーを外す更新のみ許可
           isManage() &&
+          isNotDeleted() &&
           currentUserData().currentOrganizationId != null &&
           isMember(currentUserData().currentOrganizationId) &&
           // 対象ユーザーがその組織に所属していること
@@ -73,42 +79,44 @@ service cloud.firestore {
     
     // 組織コレクション
     match /organizations/{organizationId} {
-      // 認証済みユーザーは作成可能
-      allow create: if signedIn();
+      // 認証済みユーザーは作成可能（削除済みでない場合のみ）
+      allow create: if signedIn() && isNotDeleted();
       
-      // 認証済みユーザーは読み取り可能（組織IDを確認するため）
-      allow read: if signedIn();
+      // 認証済みユーザーは読み取り可能（組織IDを確認するため）、削除済みでない場合のみ
+      allow read: if signedIn() && isNotDeleted();
       
-      // 自分が管理者の組織は更新・削除可能
+      // 自分が管理者の組織は更新・削除可能（削除済みでない場合のみ）
       allow update, delete: if signedIn() &&
+                               isNotDeleted() &&
                                isMember(organizationId) &&
                                isManage();
 
       // 組織配下: メンバー個別設定（例: 交通費）
       match /members/{userId} {
-        // 読み取り: 管理者かつ同一組織のメンバー
-        allow read: if signedIn() && isMember(organizationId) && isManage();
-        // 書き込み: 管理者かつ同一組織のメンバー
-        allow create, update, delete: if signedIn() && isMember(organizationId) && isManage();
+        // 読み取り: 管理者かつ同一組織のメンバー、削除済みでない場合のみ
+        allow read: if signedIn() && isNotDeleted() && isMember(organizationId) && isManage();
+        // 書き込み: 管理者かつ同一組織のメンバー、削除済みでない場合のみ
+        allow create, update, delete: if signedIn() && isNotDeleted() && isMember(organizationId) && isManage();
       }
     }
     
     // シフトコレクション
     match /shifts/{shiftId} {
-      // 読み取り: ログイン済み & 同じ組織のメンバー
-      allow read: if signedIn() && isMember(resource.data.organizationId);
+      // 読み取り: ログイン済み & 同じ組織のメンバー & 削除済みでない
+      allow read: if signedIn() && isNotDeleted() && isMember(resource.data.organizationId);
 
-      // 作成: ログイン済み & 所属組織のシフト & 自分のuserRef
+      // 作成: ログイン済み & 所属組織のシフト & 自分のuserRef & 削除済みでない
       // デバッグ用に条件を分けて記述
       allow create: if signedIn() &&
+              isNotDeleted() &&
               request.resource.data.userRef == /databases/$(database)/documents/users/$(request.auth.uid) &&
               isMember(request.resource.data.organizationId) &&
               submissionAllowed(request.resource.data.organizationId, request.resource.data.date);
 
       // 更新:
-      // - 管理者: 同一組織内なら更新可（承認/却下操作を想定）
-      // - 本人: statusがpendingの間のみ、かつstatus/organizationId/userRefを変更不可
-      allow update: if signedIn() && isMember(resource.data.organizationId) && (
+      // - 管理者: 同一組織内なら更新可（承認/却下操作を想定）& 削除済みでない
+      // - 本人: statusがpendingの間のみ、かつstatus/organizationId/userRefを変更不可 & 削除済みでない
+      allow update: if signedIn() && isNotDeleted() && isMember(resource.data.organizationId) && (
                       isManage() || (
                         resource.data.userRef == /databases/$(database)/documents/users/$(request.auth.uid) &&
                         (!('status' in resource.data) || resource.data.status == 'pending') &&
@@ -119,8 +127,8 @@ service cloud.firestore {
                       )
                     );
 
-      // 削除: 管理者は可。本人はstatusがpendingのときのみ可（未設定はpending扱い）
-      allow delete: if signedIn() && isMember(resource.data.organizationId) && (
+      // 削除: 管理者は可。本人はstatusがpendingのときのみ可（未設定はpending扱い）& 削除済みでない
+      allow delete: if signedIn() && isNotDeleted() && isMember(resource.data.organizationId) && (
                       isManage() || (
                         resource.data.userRef == /databases/$(database)/documents/users/$(request.auth.uid) &&
                         (!('status' in resource.data) || resource.data.status == 'pending') &&
@@ -131,15 +139,36 @@ service cloud.firestore {
     
     // タイムカードコレクション
     match /timecards/{timecardId} {
-      // 自分が所属する組織のタイムカードは読み取り可能
-      allow read: if signedIn() && isMember(resource.data.organizationId);
+      // 自分が所属する組織のタイムカードは読み取り可能 & 削除済みでない
+      allow read: if signedIn() && isNotDeleted() && isMember(resource.data.organizationId);
       
-      // アルバイトは自分のタイムカードを作成・更新可能
-      allow create, update: if signedIn() && 
-                               request.auth.uid == request.resource.data.userId &&
-                               isMember(request.resource.data.organizationId);
+      // アルバイトは自分のタイムカードを作成可能（status=draftのみ）& 削除済みでない
+      allow create: if signedIn() && 
+                       isNotDeleted() &&
+                       request.auth.uid == request.resource.data.userId &&
+                       isMember(request.resource.data.organizationId) &&
+                       request.resource.data.status == 'draft';
       
-      // 管理者は同じ組織のタイムカードを更新・削除可能
+      // アルバイトは自分のタイムカードを以下の条件で更新可能 & 削除済みでない
+      // - status=draftの間は自由に更新可能（statusをdraftからpendingに変更することも含む）
+      // - rejectedからdraftへの巻き戻しも可能
+      // - 打刻フィールド（clockInAt, clockOutAt, breakStartAt, breakEndAt, updatedAt）のみの更新は、statusに関係なく可能
+      allow update: if signedIn() && 
+                       isNotDeleted() &&
+                       request.auth.uid == resource.data.userId &&
+                       isMember(resource.data.organizationId) &&
+                       (
+                         (resource.data.status == 'draft') ||
+                         (resource.data.status == 'rejected' && request.resource.data.status == 'draft') ||
+                         (
+                           // 打刻フィールドのみの変更を許可（statusは変更しない）
+                           request.resource.data.status == resource.data.status &&
+                           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['clockInAt', 'clockOutAt', 'breakStartAt', 'breakEndAt', 'updatedAt'])
+                         )
+                       );
+      
+      // 管理者は同じ組織のタイムカードを更新・削除可能（承認/却下を含む）& 削除済みでない
+      allow update, delete: if signedIn() && isNotDeleted() && isMember(resource.data.organizationId) && isManage();
       allow update, delete: if signedIn() && isMember(resource.data.organizationId) && isManage();
     }
   }

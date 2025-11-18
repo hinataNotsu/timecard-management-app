@@ -37,6 +37,7 @@ export default function AdminShiftListPage() {
   const [selectedUserId, setSelectedUserId] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'table' | 'month'>('table');
   const [orgSettings, setOrgSettings] = useState<{ defaultHourlyWage: number; nightPremiumEnabled: boolean; nightPremiumRate: number; nightStart: string; nightEnd: string } | null>(null);
+  const [allOrgUsers, setAllOrgUsers] = useState<{ id: string; name: string; seed?: string; bgColor?: string }[]>([]);
 
   useEffect(() => {
     if (!userProfile?.isManage) {
@@ -64,6 +65,41 @@ export default function AdminShiftListPage() {
           }
         } catch (e) {
           console.warn('[Admin List] failed to load org settings', e);
+        }
+
+        // 組織の全メンバーを取得（usersコレクションからorganizationIdsで取得）
+        // 削除済み（deleted: true）のユーザーは除外
+        try {
+          const usersQuery = query(
+            collection(db, 'users'),
+            where('organizationIds', 'array-contains', userProfile.currentOrganizationId)
+          );
+          const usersSnap = await getDocs(usersQuery);
+          
+          const allUsers = usersSnap.docs
+            .filter(userDoc => {
+              const userData = userDoc.data() as any;
+              // deleted: trueのユーザーは除外（過去のシフトには表示されるが、新規作成時の選択肢には出さない）
+              return !userData.deleted;
+            })
+            .map(userDoc => {
+              const userData = userDoc.data() as any;
+              const userId = userDoc.id;
+              const name = userData.displayName || userId;
+              const seed = userData.avatarSeed || name || userId;
+              const bgColor = userData.avatarBackgroundColor;
+              
+              return {
+                id: userId,
+                name,
+                seed,
+                bgColor,
+              };
+            });
+          
+          setAllOrgUsers(allUsers);
+        } catch (e) {
+          console.warn('[Admin List] failed to load org members', e);
         }
         // 月範囲でのサーバーサイド絞り込み
         const y = selectedMonth.getFullYear();
@@ -101,12 +137,19 @@ export default function AdminShiftListPage() {
             const u = await getDoc(doc(db, 'users', userId));
             if (u.exists()) {
               const data = u.data() as any;
-              name = data.displayName || userId;
+              // 削除されたユーザーの場合は「(退職済み) 名前」と表示
+              if (data.deleted) {
+                name = `(退職済み) ${data.displayName || userId}`;
+              } else {
+                name = data.displayName || userId;
+              }
               seed = data.avatarSeed || name || userId;
               bgColor = data.avatarBackgroundColor;
             }
           } catch (err) {
             console.warn('[Debug] users read failed for', userId, err);
+            // ユーザードキュメントが存在しない場合は削除済みとみなす
+            name = `(退職済み) ${userId}`;
           }
           const info = { name, seed, bgColor };
           userCache.set(userId, info);
@@ -158,7 +201,8 @@ export default function AdminShiftListPage() {
 
   // 月範囲はクエリで絞っているため前処理不要
 
-  const usersInList = useMemo(() => {
+  // 表モード用：シフトがあるユーザーのみ
+  const usersWithShifts = useMemo(() => {
     const map = new Map<string, { name: string; seed?: string; bgColor?: string }>();
     shifts.forEach(s => {
       const cur = map.get(s.userId);
@@ -166,6 +210,12 @@ export default function AdminShiftListPage() {
     });
     return Array.from(map.entries()).map(([id, v]) => ({ id, name: v.name, seed: v.seed, bgColor: v.bgColor }));
   }, [shifts]);
+
+  // 月カレンダー用：全ユーザー（usersコレクションから取得した組織メンバー全員）
+  const usersForCalendar = useMemo(() => {
+    // 名前順にソート
+    return [...allOrgUsers].sort((a, b) => a.name.localeCompare(b.name));
+  }, [allOrgUsers]);
 
   const filtered = useMemo(() => {
     return shifts
@@ -295,7 +345,7 @@ export default function AdminShiftListPage() {
               <label className="text-sm text-gray-600">ユーザー</label>
               <select value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)} className="px-2 py-1 border rounded">
                 <option value="all">すべて</option>
-                {usersInList.map(u => (
+                {usersWithShifts.map(u => (
                   <option value={u.id} key={u.id}>{u.name}</option>
                 ))}
               </select>
@@ -378,7 +428,7 @@ export default function AdminShiftListPage() {
                 </tr>
               </thead>
               <tbody>
-                {usersInList.map(user => (
+                {usersForCalendar.map(user => (
                   <tr key={user.id} className="hover:bg-gray-50">
                     <td className="sticky left-0 bg-white z-10 p-2 border border-gray-300/50">
                       <div className="flex items-center gap-2">

@@ -75,6 +75,18 @@ export default function CompanySignUpPage() {
       await setDoc(doc(db, 'users', userId), userData);
       console.log('[Company Signup] User profile saved');
 
+      // membersサブコレクションにデフォルト設定を作成
+      try {
+        await setDoc(doc(db, 'organizations', orgId, 'members', userId), {
+          transportAllowancePerShift: 0,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        });
+        console.log('[Company Signup] Member document created');
+      } catch (err) {
+        console.warn('[Company Signup] Failed to create member document:', err);
+      }
+
       // ページをリロードしてAuthContextに最新のユーザー情報を読み込ませる
       console.log('[Company Signup] Reloading page to refresh auth state...');
       window.location.href = '/dashboard/company';

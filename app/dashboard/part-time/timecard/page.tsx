@@ -15,6 +15,8 @@ interface TimecardRecord {
   breakStartAt?: Timestamp;
   breakEndAt?: Timestamp;
   clockOutAt?: Timestamp;
+  hourlyWage?: number;
+  status: 'draft' | 'pending' | 'approved' | 'rejected';
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -48,7 +50,7 @@ export default function TimecardPage() {
     return `${y}-${m}-${day}`;
   }, []);
 
-  // load today's timecard
+  // load today's latest incomplete timecard
   useEffect(() => {
     const load = async () => {
       if (!userProfile?.uid || !userProfile.currentOrganizationId) return;
@@ -61,9 +63,15 @@ export default function TimecardPage() {
           where('dateKey', '==', dateKey)
         );
         const snap = await getDocs(qy);
-        if (!snap.empty) {
-          const d = snap.docs[0];
-          setRecord(d.data() as TimecardRecord);
+        // 最新の未完了タイムカード（clockOutAtがないもの）を優先、なければ最新のもの
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as TimecardRecord));
+        const incomplete = docs.find(d => !d.clockOutAt);
+        if (incomplete) {
+          setRecord(incomplete);
+        } else if (docs.length > 0) {
+          // 全て完了している場合は最新のものを表示（createdAtでソート）
+          const sorted = docs.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
+          setRecord(sorted[0]);
         }
       } catch (e) {
         console.error('[Timecard] load error', e);
@@ -75,14 +83,30 @@ export default function TimecardPage() {
   }, [userProfile?.uid, userProfile?.currentOrganizationId, dateKey]);
 
   const ensureRecord = async (): Promise<TimecardRecord> => {
-    if (record) return record;
+    if (record && !record.clockOutAt) return record; // 未完了のタイムカードがあればそれを使う
     if (!userProfile?.uid || !userProfile.currentOrganizationId) throw new Error('missing user/org');
+    // ユーザー別時給取得（なければ組織デフォルト）
+    let wage: number | undefined;
+    try {
+      const memberSnap = await getDoc(doc(db, 'organizations', userProfile.currentOrganizationId, 'members', userProfile.uid));
+      if (memberSnap.exists()) {
+        wage = memberSnap.data()?.hourlyWage;
+      }
+      if (!wage) {
+        const orgSnap = await getDoc(doc(db, 'organizations', userProfile.currentOrganizationId));
+        wage = orgSnap.exists() ? (orgSnap.data() as any).defaultHourlyWage : 1100;
+      }
+    } catch {
+      wage = 1100;
+    }
     const ref = doc(collection(db, 'timecards'));
     const base: TimecardRecord = {
       id: ref.id,
       dateKey,
       organizationId: userProfile.currentOrganizationId,
       userId: userProfile.uid,
+      hourlyWage: wage,
+      status: 'draft',
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now()
     };
@@ -135,6 +159,11 @@ export default function TimecardPage() {
   const canBreakStart = !!record?.clockInAt && !record.breakStartAt && !record.clockOutAt;
   const canBreakEnd = !!record?.breakStartAt && !record.breakEndAt && !record.clockOutAt;
   const canClockOut = !!record?.clockInAt && !record.clockOutAt && (!record.breakStartAt || !!record.breakEndAt);
+  const canStartNew = !!record?.clockOutAt; // 退勤済みなら新しいタイムカードを開始できる
+
+  const startNewTimecard = () => {
+    setRecord(null); // レコードをクリアして新しいタイムカードを作成可能にする
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -155,12 +184,14 @@ export default function TimecardPage() {
             {loading && !record ? (
               <p className="text-gray-500">読み込み中...</p>
             ) : (
-              <ul className="space-y-2 text-sm">
-                <li><span className="inline-block w-24 text-gray-600">出勤:</span> {fmt(record?.clockInAt)}</li>
-                <li><span className="inline-block w-24 text-gray-600">休憩開始:</span> {fmt(record?.breakStartAt)}</li>
-                <li><span className="inline-block w-24 text-gray-600">休憩終了:</span> {fmt(record?.breakEndAt)}</li>
-                <li><span className="inline-block w-24 text-gray-600">退勤:</span> {fmt(record?.clockOutAt)}</li>
-              </ul>
+              <>
+                <ul className="space-y-2 text-sm">
+                  <li><span className="inline-block w-24 text-gray-600">出勤:</span> {fmt(record?.clockInAt)}</li>
+                  <li><span className="inline-block w-24 text-gray-600">休憩開始:</span> {fmt(record?.breakStartAt)}</li>
+                  <li><span className="inline-block w-24 text-gray-600">休憩終了:</span> {fmt(record?.breakEndAt)}</li>
+                  <li><span className="inline-block w-24 text-gray-600">退勤:</span> {fmt(record?.clockOutAt)}</li>
+                </ul>
+              </>
             )}
             <div className="mt-4 grid grid-cols-2 gap-2">
               <button disabled={!canClockIn} onClick={() => updateField('clockInAt')} className={`px-3 py-2 rounded text-white text-sm ${canClockIn ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-300 cursor-not-allowed'}`}>出勤</button>
@@ -168,6 +199,11 @@ export default function TimecardPage() {
               <button disabled={!canBreakStart} onClick={() => updateField('breakStartAt')} className={`px-3 py-2 rounded text-white text-sm ${canBreakStart ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-300 cursor-not-allowed'}`}>休憩開始</button>
               <button disabled={!canBreakEnd} onClick={() => updateField('breakEndAt')} className={`px-3 py-2 rounded text-white text-sm ${canBreakEnd ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-300 cursor-not-allowed'}`}>休憩終了</button>
             </div>
+            {canStartNew && (
+              <div className="mt-4">
+                <button onClick={startNewTimecard} className="w-full px-3 py-2 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium">新しいタイムカードを開始</button>
+              </div>
+            )}
           </div>
 
           <div className="bg-white rounded-lg shadow p-4">
@@ -178,10 +214,6 @@ export default function TimecardPage() {
             </div>
             <p className="mt-4 text-xs text-gray-500">※ 一度打刻した項目は修正できません（将来編集機能追加予定）。</p>
           </div>
-        </div>
-
-        <div className="bg-yellow-50 border border-yellow-200 rounded p-4 text-sm text-yellow-800">
-          給与計算をタイムカードベースに切り替えるには、既存のシフト登録ロジックとの統合が必要です。次のステップとして自動シフト生成または計算時にタイムカードを参照する処理を追加できます。
         </div>
       </div>
     </div>

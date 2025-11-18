@@ -25,7 +25,7 @@ type OrgPaySettings = Pick<
 >;
 
 const defaultSettings: Required<OrgPaySettings> = {
-  defaultHourlyWage: 1100,
+  defaultHourlyWage: 1200,
   nightPremiumEnabled: false,
   nightPremiumRate: 0.25,
   nightStart: '22:00',
