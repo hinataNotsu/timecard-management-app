@@ -16,6 +16,12 @@ interface ShiftRow {
   hourlyWage?: number;
 }
 
+interface UserInfo {
+  name: string;
+  seed?: string;
+  bgColor?: string;
+}
+
 export default function PayrollPage() {
   const { userProfile } = useAuth();
   const router = useRouter();
@@ -25,6 +31,7 @@ export default function PayrollPage() {
   });
   const [loading, setLoading] = useState(true);
   const [shifts, setShifts] = useState<ShiftRow[]>([]);
+  const [userInfoMap, setUserInfoMap] = useState<Record<string, UserInfo>>({});
   const [memberTransport, setMemberTransport] = useState<Record<string, number>>({});
   const [orgSettings, setOrgSettings] = useState<{
     defaultHourlyWage: number;
@@ -103,16 +110,24 @@ export default function PayrollPage() {
         });
         setMemberTransport(Object.fromEntries(transportMap));
 
-        const nameCache = new Map<string, string>();
-        const getUserName = async (userId: string) => {
-          if (nameCache.has(userId)) return nameCache.get(userId)!;
+        const infoCache = new Map<string, UserInfo>();
+        const getUserInfo = async (userId: string) => {
+          if (infoCache.has(userId)) return infoCache.get(userId)!;
           let name = userId;
+          let seed: string | undefined;
+          let bgColor: string | undefined;
           try {
             const u = await getDoc(doc(db, 'users', userId));
-            name = (u.exists() ? (u.data() as any).displayName : '') || userId;
+            if (u.exists()) {
+              const data = u.data() as any;
+              name = data.displayName || userId;
+              seed = data.avatarSeed || name || userId;
+              bgColor = data.avatarBackgroundColor;
+            }
           } catch {}
-          nameCache.set(userId, name);
-          return name;
+            const info: UserInfo = { name, seed, bgColor };
+            infoCache.set(userId, info);
+            return info;
         };
 
         const rows: ShiftRow[] = [];
@@ -124,7 +139,7 @@ export default function PayrollPage() {
           const userRefPath: string = data.userRef?.path || '';
           const userId = userRefPath.split('/').pop();
           if (!userId) continue;
-          const userName = await getUserName(userId);
+          const { name: userName } = await getUserInfo(userId);
           rows.push({
             userId,
             userName,
@@ -135,6 +150,8 @@ export default function PayrollPage() {
           });
         }
         setShifts(rows);
+        // userInfoMapをセット
+        setUserInfoMap(Object.fromEntries(Array.from(infoCache.entries()).map(([id, v]) => [id, v])));
       } catch (e) {
         console.error('[Payroll] load error', e);
       } finally {
@@ -404,7 +421,7 @@ export default function PayrollPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
-                <th className="p-2 border-b text-center">ユーザー</th>
+                <th className="p-2 border-b text-left">ユーザー</th>
                 <th className="p-2 border-b text-center">件数</th>
                 <th className="p-2 border-b text-center">時間(分)</th>
                 <th className="p-2 border-b text-center">夜間(分)</th>
@@ -422,22 +439,49 @@ export default function PayrollPage() {
               ) : byUser.length === 0 ? (
                 <tr><td className="p-4 text-center" colSpan={10}>該当データがありません</td></tr>
               ) : (
-                byUser.map((u) => (
-                  <tr key={u.userId} className="hover:bg-gray-50">
-                    <td className="p-2 border-b text-center">{u.userName}</td>
-                    <td className="p-2 border-b text-center">{u.count}</td>
-                    <td className="p-2 border-b text-center">{u.min}</td>
-                    <td className="p-2 border-b text-center">{u.night}</td>
-                    <td className="p-2 border-b text-center">¥{Math.round(u.base).toLocaleString('ja-JP')}</td>
-                    <td className="p-2 border-b text-center">¥{Math.round(u.nightAmount).toLocaleString('ja-JP')}</td>
-                    <td className="p-2 border-b text-center">¥{Math.round(u.overtimeAmount).toLocaleString('ja-JP')}</td>
-                    <td className="p-2 border-b text-center">¥{Math.round(u.holidayAmount).toLocaleString('ja-JP')}</td>
-                    <td className="p-2 border-b text-center">¥{Math.round(u.transportAmount).toLocaleString('ja-JP')}</td>
-                    <td className="p-2 border-b text-center">¥{Math.round(u.total).toLocaleString('ja-JP')}</td>
-                  </tr>
-                ))
+                byUser.map((u) => {
+                  const info = userInfoMap[u.userId];
+                  const seed = info?.seed || u.userName || u.userId;
+                  const bgColor = info?.bgColor;
+                  const avatarUrl = `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(seed)}${bgColor ? `&backgroundColor=${encodeURIComponent(bgColor)}` : '&backgroundType=gradientLinear'}&radius=50&fontWeight=700`;
+                  return (
+                    <tr key={u.userId} className="hover:bg-gray-50">
+                      <td className="p-2 border-b text-left">
+                        <div className="flex items-center gap-2">
+                          <img src={avatarUrl} alt={u.userName} className="w-8 h-8 rounded-full ring-1 ring-gray-200" />
+                          <span>{u.userName}</span>
+                        </div>
+                      </td>
+                      <td className="p-2 border-b text-center">{u.count}</td>
+                      <td className="p-2 border-b text-center">{u.min}</td>
+                      <td className="p-2 border-b text-center">{u.night}</td>
+                      <td className="p-2 border-b text-center">¥{Math.round(u.base).toLocaleString('ja-JP')}</td>
+                      <td className="p-2 border-b text-center">¥{Math.round(u.nightAmount).toLocaleString('ja-JP')}</td>
+                      <td className="p-2 border-b text-center">¥{Math.round(u.overtimeAmount).toLocaleString('ja-JP')}</td>
+                      <td className="p-2 border-b text-center">¥{Math.round(u.holidayAmount).toLocaleString('ja-JP')}</td>
+                      <td className="p-2 border-b text-center">¥{Math.round(u.transportAmount).toLocaleString('ja-JP')}</td>
+                      <td className="p-2 border-b text-center">¥{Math.round(u.total).toLocaleString('ja-JP')}</td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
+            {!loading && byUser.length > 0 && (
+              <tfoot>
+                <tr className="bg-gray-100 font-semibold">
+                  <td className="p-2 border-t text-left">合計</td>
+                  <td className="p-2 border-t text-center">{byUser.reduce((a,c)=>a+c.count,0)}</td>
+                  <td className="p-2 border-t text-center">{byUser.reduce((a,c)=>a+c.min,0)}</td>
+                  <td className="p-2 border-t text-center">{byUser.reduce((a,c)=>a+c.night,0)}</td>
+                  <td className="p-2 border-t text-center">¥{Math.round(byUser.reduce((a,c)=>a+c.base,0)).toLocaleString('ja-JP')}</td>
+                  <td className="p-2 border-t text-center">¥{Math.round(byUser.reduce((a,c)=>a+c.nightAmount,0)).toLocaleString('ja-JP')}</td>
+                  <td className="p-2 border-t text-center">¥{Math.round(byUser.reduce((a,c)=>a+c.overtimeAmount,0)).toLocaleString('ja-JP')}</td>
+                  <td className="p-2 border-t text-center">¥{Math.round(byUser.reduce((a,c)=>a+c.holidayAmount,0)).toLocaleString('ja-JP')}</td>
+                  <td className="p-2 border-t text-center">¥{Math.round(byUser.reduce((a,c)=>a+c.transportAmount,0)).toLocaleString('ja-JP')}</td>
+                  <td className="p-2 border-t text-center">¥{Math.round(byUser.reduce((a,c)=>a+c.total,0)).toLocaleString('ja-JP')}</td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       </div>

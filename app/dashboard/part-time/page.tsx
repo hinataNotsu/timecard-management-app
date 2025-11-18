@@ -234,9 +234,12 @@ export default function PartTimeDashboard() {
           {/* 給与一覧カード */}
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">給与一覧</h2>
-            <p className="text-gray-600 mb-4">給与の詳細を確認</p>
-            <button className="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition">
-              給与を見る
+            <p className="text-gray-600 mb-4">承認済みシフトから計算された給与を確認</p>
+            <button
+              onClick={() => router.push('/dashboard/part-time/payroll')}
+              className="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition"
+            >
+              今月の給与一覧へ
             </button>
           </div>
 
@@ -259,8 +262,11 @@ export default function PartTimeDashboard() {
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">タイムカード</h2>
             <p className="text-gray-600 mb-4">出退勤の打刻</p>
-            <button className="w-full px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition">
-              打刻する
+            <button
+              onClick={() => router.push('/dashboard/part-time/timecard')}
+              className="w-full px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition"
+            >
+              タイムカードページへ
             </button>
           </div>
 
