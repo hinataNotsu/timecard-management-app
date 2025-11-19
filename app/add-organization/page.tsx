@@ -4,32 +4,19 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db, auth } from '@/lib/firebase';
 import Link from 'next/link';
 
 function AddOrganizationForm() {
   const [organizationId, setOrganizationId] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [returnTo, setReturnTo] = useState<'company' | 'part-time'>('part-time');
+  const [dialogOpen, setDialogOpen] = useState(false);
   const { userProfile, updateUserProfile } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  useEffect(() => {
-    const returnToParam = searchParams.get('returnTo');
-    if (returnToParam === 'company' || returnToParam === 'part-time') {
-      setReturnTo(returnToParam);
-    }
-
-    // isManage=trueのユーザーがpart-timeから来た場合はブロック
-    if (userProfile?.isManage && returnToParam === 'part-time') {
-      setError('管理者はアルバイトダッシュボードから組織を追加できません');
-      setTimeout(() => {
-        router.push('/dashboard/part-time');
-      }, 2000);
-    }
-  }, [searchParams, userProfile, router]);
+  // returnTo関連のロジックは不要なので削除
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,102 +24,62 @@ function AddOrganizationForm() {
     setLoading(true);
 
     try {
+      console.log('[Add Organization] Firebase Auth currentUser:', auth.currentUser);
+      console.log('[Add Organization] UserProfile:', userProfile);
+      console.log('[Add Organization] UserProfile.displayName:', userProfile?.displayName);
+      console.log('[Add Organization] UserProfile.email:', userProfile?.email);
       const inputId = organizationId.trim();
-      console.log('[Add Organization] Step 1: Input ID:', inputId);
-      console.log('[Add Organization] Step 1: Current user:', userProfile?.uid);
-      console.log('[Add Organization] Step 1: Current organizationIds:', userProfile?.organizationIds);
-      
+      if (!inputId) {
+        setError('企業IDを入力してください');
+        setLoading(false);
+        return;
+      }
       // 組織が存在するか確認
-      console.log('[Add Organization] Step 2: Checking organization existence...');
       const orgDocRef = doc(db, 'organizations', inputId);
       const orgDoc = await getDoc(orgDocRef);
-      
       if (!orgDoc.exists()) {
-        console.log('[Add Organization] Step 2: Organization not found');
         setError('入力された企業IDが見つかりません。正しいIDを入力してください。');
         setLoading(false);
         return;
       }
-
-      const orgData = orgDoc.data();
-      console.log('[Add Organization] Step 2: Organization found:', orgData?.name);
-
-      // 既に所属している場合はスキップ
-      const currentOrgIds = userProfile?.organizationIds || [];
-      if (currentOrgIds.includes(inputId)) {
-        console.log('[Add Organization] Step 3: Already a member');
-        setError('既にこの組織に所属しています');
-        setLoading(false);
-        return;
-      }
-
-      // ユーザープロフィールに組織IDを追加
-      console.log('[Add Organization] Step 3: Updating user profile to users collection...');
-      console.log('[Add Organization] Step 3: New organizationIds:', [...currentOrgIds, inputId]);
-      try {
-        await updateUserProfile({
-          organizationIds: [...currentOrgIds, inputId],
-          currentOrganizationId: inputId,
-        });
-        console.log('[Add Organization] Step 3: ✓ User profile updated successfully');
-      } catch (err) {
-        console.error('[Add Organization] Step 3: ✗ User profile update failed:', err);
-        throw err;
-      }
-
-      // membersサブコレクションにデフォルト設定を作成（時給は組織デフォルトを反映）
-      console.log('[Add Organization] Step 4: Creating member document...');
-      console.log('[Add Organization] Step 4: Path: organizations/' + inputId + '/members/' + userProfile?.uid);
-      try {
-        if (userProfile?.uid) {
-          const defWage = (orgData as any)?.defaultHourlyWage;
-          const parsedWage = typeof defWage === 'number' ? defWage : (Number(defWage) || null);
-          console.log('[Add Organization] Step 4: Member data:', {
-            transportAllowancePerShift: 0,
-            hourlyWage: parsedWage,
-            userId: userProfile.uid,
-          });
-          
-          await setDoc(doc(db, 'organizations', inputId, 'members', userProfile.uid), {
-            transportAllowancePerShift: 0,
-            hourlyWage: parsedWage,
-            createdAt: Timestamp.now(),
-            updatedAt: Timestamp.now(),
-          });
-          console.log('[Add Organization] Step 4: ✓ Member document created successfully');
+      // permissionListに既に申請があるかチェック
+      if (userProfile?.uid) {
+        const orgData = orgDoc.data();
+        const permissionList = Array.isArray(orgData.permissionList) ? orgData.permissionList : [];
+        const alreadyRequested = permissionList.some((p: any) => p.uid === userProfile.uid);
+        if (alreadyRequested) {
+          setError('既に申請中です');
+          setLoading(false);
+          return;
         }
-      } catch (err: any) {
-        console.error('[Add Organization] Step 4: ✗ Member document creation failed:', err);
-        console.error('[Add Organization] Step 4: Error code:', err?.code);
-        console.error('[Add Organization] Step 4: Error message:', err?.message);
-        throw err; // エラーを上位に伝播させる
+        // permissionListに申請データを追加
+        const { arrayUnion, updateDoc } = await import('firebase/firestore');
+        const applicationData = {
+          uid: userProfile.uid,
+          displayName: userProfile.displayName || '',
+          email: userProfile.email || '',
+          createdAt: Timestamp.now(),
+        };
+        console.log('[Add Organization] Application data to save:', applicationData);
+        await updateDoc(orgDocRef, {
+          permissionList: arrayUnion(applicationData)
+        });
       }
-
-      console.log('[Add Organization] Step 5: All operations completed, redirecting...');
-      console.log('[Add Organization] Step 5: Return to:', returnTo);
-      
-      // returnToパラメータに基づいてリダイレクト
-      if (returnTo === 'company') {
-        console.log('[Add Organization] Redirecting to company dashboard');
-        window.location.href = '/dashboard/company';
-      } else {
-        console.log('[Add Organization] Redirecting to part-time dashboard');
-        window.location.href = '/dashboard/part-time';
-      }
+      setDialogOpen(true);
     } catch (err: any) {
-      console.error('[Add Organization] Error:', err);
-      setError(`組織の追加に失敗しました: ${err.message}`);
+      console.error('[Add Organization] Error details:', err);
+      const errorDetails = `
+エラーコード: ${err.code || 'unknown'}
+メッセージ: ${err.message}
+詳細: ${JSON.stringify(err, null, 2)}`;
+      setError(`申請に失敗しました: ${err.message}${errorDetails}`);
     } finally {
       setLoading(false);
     }
   };
 
   const handleCancel = () => {
-    if (returnTo === 'company') {
-      router.push('/dashboard/company');
-    } else {
-      router.push('/dashboard/part-time');
-    }
+    router.push('/dashboard/part-time');
   };
 
   return (
@@ -140,7 +87,7 @@ function AddOrganizationForm() {
       <div className="max-w-md w-full space-y-8">
         <div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            組織を追加
+            組織を申請
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
             追加したい組織の企業IDを入力してください
@@ -184,11 +131,27 @@ function AddOrganizationForm() {
                 disabled={loading}
                 className="flex-1 py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
-                {loading ? '確認中...' : '申請する'}
+                {loading ? '申請中...' : '申請する'}
               </button>
           </div>
         </form>
       </div>
+      {/* 申請完了ダイアログ */}
+      {dialogOpen && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/30 z-50">
+          <div className="bg-white rounded-lg shadow-lg p-8 text-center">
+            <h3 className="text-lg font-bold mb-4">申請しました</h3>
+            <p className="mb-6">管理者が承認するまでお待ちください。</p>
+            <button
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              onClick={() => {
+                setDialogOpen(false);
+                router.push('/dashboard/part-time');
+              }}
+            >閉じる</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
