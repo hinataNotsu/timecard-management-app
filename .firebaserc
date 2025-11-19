@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "timecard-management-app"
-  }
+    "default": "timecard-management-app",
+    "production": "timecard-management-app"
+  },
+  "targets": {},
+  "etags": {}
 }

@@ -36,6 +36,9 @@ export default function AdminShiftListPage() {
   });
   const [selectedUserId, setSelectedUserId] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'table' | 'month'>('table');
+  const [selectedDay, setSelectedDay] = useState<Date | null>(null);
+  const [dayShifts, setDayShifts] = useState<ShiftRow[]>([]);
+  const [dayLoading, setDayLoading] = useState(false);
   const [orgSettings, setOrgSettings] = useState<{ defaultHourlyWage: number; nightPremiumEnabled: boolean; nightPremiumRate: number; nightStart: string; nightEnd: string } | null>(null);
   const [allOrgUsers, setAllOrgUsers] = useState<{ id: string; name: string; seed?: string; bgColor?: string }[]>([]);
 
@@ -101,95 +104,99 @@ export default function AdminShiftListPage() {
         } catch (e) {
           console.warn('[Admin List] failed to load org members', e);
         }
-        // 月範囲でのサーバーサイド絞り込み
-        const y = selectedMonth.getFullYear();
-        const m = selectedMonth.getMonth();
-        const monthStart = new Date(y, m, 1, 0, 0, 0, 0);
-        const nextMonthStart = new Date(y, m + 1, 1, 0, 0, 0, 0);
-        const q = query(
-          collection(db, 'shifts'),
-          where('organizationId', '==', userProfile.currentOrganizationId),
-          where('date', '>=', Timestamp.fromDate(monthStart)),
-          where('date', '<', Timestamp.fromDate(nextMonthStart)),
-          orderBy('date', 'asc')
-        );
-        let snap;
-        try {
-          snap = await getDocs(q);
-        } catch (err) {
-          console.error('[Debug] shifts query failed:', {
-            currentOrganizationId: userProfile.currentOrganizationId,
-            monthStart,
-            nextMonthStart,
-            error: err,
-          });
-          throw err;
-        }
-
-        // userRef→ユーザー情報（displayName, avatarSeed）をキャッシュ取得
-        const userCache = new Map<string, { name: string; seed: string; bgColor?: string }>();
-        const getUserInfo = async (userId: string) => {
-          if (userCache.has(userId)) return userCache.get(userId)!;
-          let name = userId;
-          let seed = userId;
-          let bgColor: string | undefined;
+        // 月全件読み込みは負荷が大きいため、テーブル表示時のみ月ロードする
+        if (viewMode === 'table') {
+          // 月範囲でのサーバーサイド絞り込み
+          const y = selectedMonth.getFullYear();
+          const m = selectedMonth.getMonth();
+          const monthStart = new Date(y, m, 1, 0, 0, 0, 0);
+          const nextMonthStart = new Date(y, m + 1, 1, 0, 0, 0, 0);
+          const q = query(
+            collection(db, 'shifts'),
+            where('organizationId', '==', userProfile.currentOrganizationId),
+            where('date', '>=', Timestamp.fromDate(monthStart)),
+            where('date', '<', Timestamp.fromDate(nextMonthStart)),
+            orderBy('date', 'asc')
+          );
+          let snap;
           try {
-            const u = await getDoc(doc(db, 'users', userId));
-            if (u.exists()) {
-              const data = u.data() as any;
-              // 削除されたユーザーの場合は「(退職済み) 名前」と表示
-              if (data.deleted) {
-                name = `(退職済み) ${data.displayName || userId}`;
-              } else {
-                name = data.displayName || userId;
-              }
-              seed = data.avatarSeed || name || userId;
-              bgColor = data.avatarBackgroundColor;
-            }
+            snap = await getDocs(q);
           } catch (err) {
-            console.warn('[Debug] users read failed for', userId, err);
-            // ユーザードキュメントが存在しない場合は削除済みとみなす
-            name = `(退職済み) ${userId}`;
+            console.error('[Debug] shifts query failed:', {
+              currentOrganizationId: userProfile.currentOrganizationId,
+              monthStart,
+              nextMonthStart,
+              error: err,
+            });
+            throw err;
           }
-          const info = { name, seed, bgColor };
-          userCache.set(userId, info);
-          return info;
-        };
-        const getApproverName = async (approvedByRef: any) => {
-          if (!approvedByRef?.path) return null;
-          const approverId = approvedByRef.path.split('/').pop();
-          if (!approverId) return null;
-          const info = await getUserInfo(approverId);
-          return info.name;
-        };
 
-        const rows: ShiftRow[] = [];
-        for (const d of snap.docs) {
-          const data = d.data() as any;
-          const dateTs: Timestamp = data.date;
-          const userRefPath: string = data.userRef?.path || '';
-          const userId = userRefPath.split('/').pop();
-          if (!userId) continue;
-          const { name: userName, seed: avatarSeed, bgColor: avatarBgColor } = await getUserInfo(userId);
-          rows.push({
-            id: d.id,
-            userId,
-            userName,
-            avatarSeed,
-            avatarBgColor,
-            date: dateTs.toDate(),
-            startTime: data.startTime,
-            endTime: data.endTime,
-            note: data.note || '',
-            hourlyWage: data.hourlyWage != null ? Number(data.hourlyWage) : undefined,
-            status: (data.status as any) || 'pending',
-            approvedByName: await getApproverName(data.approvedBy),
-            approvedAt: data.approvedAt ? (data.approvedAt as Timestamp).toDate() : null,
-            rejectReason: data.rejectReason || null,
-          });
+          // userRef→ユーザー情報（displayName, avatarSeed）をキャッシュ取得
+          const userCache = new Map<string, { name: string; seed: string; bgColor?: string }>();
+          const getUserInfo = async (userId: string) => {
+            if (userCache.has(userId)) return userCache.get(userId)!;
+            let name = userId;
+            let seed = userId;
+            let bgColor: string | undefined;
+            try {
+              const u = await getDoc(doc(db, 'users', userId));
+              if (u.exists()) {
+                const data = u.data() as any;
+                if (data.deleted) {
+                  name = `(退職済み) ${data.displayName || userId}`;
+                } else {
+                  name = data.displayName || userId;
+                }
+                seed = data.avatarSeed || name || userId;
+                bgColor = data.avatarBackgroundColor;
+              }
+            } catch (err) {
+              console.warn('[Debug] users read failed for', userId, err);
+              name = `(退職済み) ${userId}`;
+            }
+            const info = { name, seed, bgColor };
+            userCache.set(userId, info);
+            return info;
+          };
+          const getApproverName = async (approvedByRef: any) => {
+            if (!approvedByRef?.path) return null;
+            const approverId = approvedByRef.path.split('/').pop();
+            if (!approverId) return null;
+            const info = await getUserInfo(approverId);
+            return info.name;
+          };
+
+          const rows: ShiftRow[] = [];
+          for (const d of snap.docs) {
+            const data = d.data() as any;
+            const dateTs: Timestamp = data.date;
+            const userRefPath: string = data.userRef?.path || '';
+            const userId = userRefPath.split('/').pop();
+            if (!userId) continue;
+            const { name: userName, seed: avatarSeed, bgColor: avatarBgColor } = await getUserInfo(userId);
+            rows.push({
+              id: d.id,
+              userId,
+              userName,
+              avatarSeed,
+              avatarBgColor,
+              date: dateTs.toDate(),
+              startTime: data.startTime,
+              endTime: data.endTime,
+              note: data.note || '',
+              hourlyWage: data.hourlyWage != null ? Number(data.hourlyWage) : undefined,
+              status: (data.status as any) || 'pending',
+              approvedByName: await getApproverName(data.approvedBy),
+              approvedAt: data.approvedAt ? (data.approvedAt as Timestamp).toDate() : null,
+              rejectReason: data.rejectReason || null,
+            });
+          }
+
+          setShifts(rows);
+        } else {
+          // 月ビューでは月全件は読み込まず、日クリックで遅延取得する
+          setShifts([]);
         }
-
-        setShifts(rows);
       } catch (e) {
         console.error('[Debug] admin list load failed:', e);
       } finally {
@@ -264,6 +271,89 @@ export default function AdminShiftListPage() {
     const base = hourly * (totalMin / 60);
     const premium = hourly * (nightMin / 60) * orgSettings.nightPremiumRate;
     return Math.round(base + premium);
+  };
+
+  // 日クリック時に当日のシフトを遅延取得する
+  const fetchDayShifts = async (day: Date) => {
+    if (!userProfile?.currentOrganizationId) return;
+    setDayLoading(true);
+    try {
+      const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0, 0);
+      const nextDay = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+      const q = query(
+        collection(db, 'shifts'),
+        where('organizationId', '==', userProfile.currentOrganizationId),
+        where('date', '>=', Timestamp.fromDate(dayStart)),
+        where('date', '<', Timestamp.fromDate(nextDay)),
+        orderBy('startTime', 'asc')
+      );
+      const snap = await getDocs(q);
+
+      const rows: ShiftRow[] = [];
+      for (const d of snap.docs) {
+        const data = d.data() as any;
+        const dateTs: Timestamp = data.date;
+        const userRefPath: string = data.userRef?.path || '';
+        const userId = userRefPath.split('/').pop();
+        if (!userId) continue;
+        // まず組織メンバーキャッシュから探す
+        const cached = allOrgUsers.find(u => u.id === userId);
+        let userName = cached?.name || userId;
+        let avatarSeed = cached?.seed || userName;
+        let avatarBgColor = cached?.bgColor;
+        try {
+          if (!cached) {
+            const u = await getDoc(doc(db, 'users', userId));
+            if (u.exists()) {
+              const ud = u.data() as any;
+              if (ud.deleted) userName = `(退職済み) ${ud.displayName || userId}`;
+              else userName = ud.displayName || userId;
+              avatarSeed = ud.avatarSeed || userName;
+              avatarBgColor = ud.avatarBackgroundColor;
+            }
+          }
+        } catch (e) {
+          console.warn('failed to read user for day view', userId, e);
+        }
+
+        let approverName: string | null = null;
+        try {
+          if (data.approvedBy?.path) {
+            const approverId = data.approvedBy.path.split('/').pop();
+            if (approverId) {
+              const au = await getDoc(doc(db, 'users', approverId));
+              if (au.exists()) approverName = (au.data() as any).displayName || approverId;
+            }
+          }
+        } catch (e) {
+          console.warn('failed to read approver', e);
+        }
+
+        rows.push({
+          id: d.id,
+          userId,
+          userName,
+          avatarSeed,
+          avatarBgColor,
+          date: dateTs.toDate(),
+          startTime: data.startTime,
+          endTime: data.endTime,
+          note: data.note || '',
+          hourlyWage: data.hourlyWage != null ? Number(data.hourlyWage) : undefined,
+          status: (data.status as any) || 'pending',
+          approvedByName: approverName,
+          approvedAt: data.approvedAt ? (data.approvedAt as Timestamp).toDate() : null,
+          rejectReason: data.rejectReason || null,
+        });
+      }
+
+      setDayShifts(rows);
+    } catch (e) {
+      console.error('failed to fetch day shifts', e);
+      setDayShifts([]);
+    } finally {
+      setDayLoading(false);
+    }
   };
 
   // 管理一覧では集計/CSVを表示しない方針のため、関連機能は削除
@@ -408,79 +498,139 @@ export default function AdminShiftListPage() {
         )}
 
         {viewMode === 'month' && (
-          <div className="bg-white rounded-lg shadow overflow-x-auto">
-            <table className="w-full text-xs border-collapse">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="sticky left-0 bg-gray-50 z-10 p-2 border border-gray-300/50 text-center min-w-[120px]">ユーザー</th>
-                  {daysInMonth.map(day => {
-                    const dow = day.getDay();
-                    const holiday = JapaneseHolidays.isHoliday(day);
-                    const dateColor = holiday || dow === 0 ? 'text-red-600' : dow === 6 ? 'text-blue-600' : 'text-gray-900';
-                    const weekColor = holiday || dow === 0 ? 'text-red-500' : dow === 6 ? 'text-blue-500' : 'text-gray-500';
+          <div className="bg-white rounded-lg shadow p-4">
+            {/* 月カレンダー（週表示：日〜土） */}
+            <div className="mb-4">
+              <div className="grid grid-cols-7 border-b border-gray-300 border-opacity-50">
+                {['日','月','火','水','木','金','土'].map((w, i) => (
+                  <div key={w} className={`p-3 text-center font-semibold border-r border-gray-300 border-opacity-50 last:border-r-0 ${i===0?'text-red-600':i===6?'text-blue-600':''}`}>{w}</div>
+                ))}
+              </div>
+              <div className="mt-2 grid grid-cols-7">
+                {(() => {
+                  const y = selectedMonth.getFullYear();
+                  const m = selectedMonth.getMonth();
+                  const first = new Date(y, m, 1);
+                  const start = new Date(first);
+                  start.setDate(first.getDate() - first.getDay());
+                  const cells: Date[] = [];
+                  for (let i = 0; i < 42; i++) {
+                    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+                    cells.push(d);
+                  }
+                  return cells.map(d => {
+                    const inMonth = d.getMonth() === m;
+                    const dow = d.getDay();
+                    const holiday = JapaneseHolidays.isHoliday(d);
+                    const dateColor = holiday || dow === 0 ? 'text-red-600' : dow === 6 ? 'text-blue-600' : inMonth ? 'text-gray-900' : 'text-gray-300';
+                    const isSelected = selectedDay && selectedDay.getFullYear() === d.getFullYear() && selectedDay.getMonth() === d.getMonth() && selectedDay.getDate() === d.getDate();
                     return (
-                      <th key={day.toISOString()} className="p-2 border border-gray-300/50 text-center min-w-[80px]">
-                        <div className={dateColor}>{day.getDate()}</div>
-                        <div className={`text-[10px] ${weekColor}`}>{['日','月','火','水','木','金','土'][dow]}</div>
-                      </th>
+                      <button key={d.toISOString()} onClick={() => { setSelectedDay(d); fetchDayShifts(d); }} className={`relative min-h-24 p-2 border-r border-b border-gray-300 border-opacity-50 last:border-r-0 ${!inMonth?'bg-gray-50':''} ${isSelected ? 'bg-blue-50 border-blue-200' : 'bg-white'}`}>
+                        <div className={`absolute top-1 left-1 text-sm ${!inMonth ? 'text-gray-400' : dateColor} ${isSelected ? 'font-bold' : ''}`}>{d.getDate()}</div>
+                        <div className="text-[11px] text-gray-400" style={{ visibility: 'hidden' }}>{inMonth ? '' : ''}</div>
+                      </button>
                     );
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {usersForCalendar.map(user => (
-                  <tr key={user.id} className="hover:bg-gray-50">
-                    <td className="sticky left-0 bg-white z-10 p-2 border border-gray-300/50">
-                      <div className="flex items-center gap-2">
-                        <img src={avatarUrl(user.seed || user.name || user.id, user.bgColor)} alt={user.name} className="w-6 h-6 rounded-full ring-1 ring-gray-200" />
-                        <span className="text-sm">{user.name}</span>
+                  });
+                })()}
+              </div>
+            </div>
+
+            {/* 選択日があれば時間軸表示（全ユーザー） */}
+            {selectedDay && (
+              <div className="mt-4 border-t pt-4">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="font-semibold">{selectedDay.getFullYear()}年{selectedDay.getMonth() + 1}月{selectedDay.getDate()}日 のシフト（時間軸）</div>
+                  <div>
+                    <button onClick={() => { setSelectedDay(null); setDayShifts([]); }} className="px-2 py-1 border rounded text-sm">閉じる</button>
+                  </div>
+                </div>
+                {dayLoading ? (
+                  <div className="text-center py-8">読み込み中...</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <div className="min-w-[900px]">
+                      {/* 時間目盛り */}
+                      <div className="flex items-center">
+                        <div className="w-40" />
+                        <div className="flex-1 relative">
+                          <div className="absolute left-0 right-0 top-0 h-6">
+                            <div className="flex h-6">
+                              {Array.from({ length: 24 }).map((_, hh) => (
+                                <div key={hh} className="flex-1 text-[11px] text-center border-l border-gray-100">{hh}:00</div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    </td>
-                    {daysInMonth.map(day => {
-                      const shift = getShiftForUserDate(user.id, day);
-                      const dayShifts = shifts.filter(s => 
-                        s.date.getFullYear() === day.getFullYear() &&
-                        s.date.getMonth() === day.getMonth() &&
-                        s.date.getDate() === day.getDate()
-                      );
-                      const hasOverlap = dayShifts.length > 1 && dayShifts.some((s1, i) => 
-                        dayShifts.slice(i + 1).some(s2 => {
-                          const start1 = parseInt(s1.startTime.replace(':', ''));
-                          const end1 = parseInt(s1.endTime.replace(':', ''));
-                          const start2 = parseInt(s2.startTime.replace(':', ''));
-                          const end2 = parseInt(s2.endTime.replace(':', ''));
-                          return !(end1 <= start2 || end2 <= start1);
-                        })
-                      );
-                      
-                      return (
-                        <td key={day.toISOString()} className={`p-1 border border-gray-300/50 text-center align-top ${hasOverlap ? 'bg-yellow-50' : ''}`}>
-                          {shift ? (
-                            <div className="text-[10px] space-y-0.5 group relative">
-                              <div className="font-semibold">{shift.startTime}-{shift.endTime}</div>
-                              {shift.status === 'approved' && <span className="inline-block px-1 rounded bg-green-100 text-green-700">承認</span>}
-                              {shift.status === 'pending' && (
-                                <div className="flex flex-col gap-0.5">
-                                  <span className="inline-block px-1 rounded bg-gray-100 text-gray-600">申請</span>
-                                  <div className="opacity-0 group-hover:opacity-100 flex gap-0.5">
-                                    <button onClick={() => approve(shift.id)} className="px-1 py-0.5 rounded bg-green-500 text-white text-[9px] hover:bg-green-600">✓</button>
-                                    <button onClick={() => reject(shift.id)} className="px-1 py-0.5 rounded bg-red-500 text-white text-[9px] hover:bg-red-600">✗</button>
+
+                      {/* ユーザー行（当日にシフト提出した人のみ表示） */}
+                      <div className="mt-8 space-y-4">
+                        {(() => {
+                          // ユニークなユーザー一覧を dayShifts から作成
+                          const map = new Map<string, { id: string; name: string; seed?: string; bgColor?: string }>();
+                          for (const s of dayShifts) {
+                            if (!map.has(s.userId)) {
+                              const cached = allOrgUsers.find(u => u.id === s.userId);
+                              map.set(s.userId, { id: s.userId, name: cached?.name || s.userName || s.userId, seed: cached?.seed || s.avatarSeed, bgColor: cached?.bgColor || s.avatarBgColor });
+                            }
+                          }
+                          const usersToShow = Array.from(map.values());
+                          if (usersToShow.length === 0) return <div className="text-sm text-gray-500">この日に提出されたシフトはありません</div>;
+                          return usersToShow.map(user => {
+                            const shiftsForUser = dayShifts.filter(s => s.userId === user.id);
+                          return (
+                            <div key={user.id} className="flex items-start">
+                              <div className="w-40 pr-2">
+                                <div className="flex items-center gap-2">
+                                  <img src={avatarUrl(user.seed || user.name || user.id, user.bgColor)} alt={user.name} className="w-8 h-8 rounded-full ring-1 ring-gray-200" />
+                                  <div className="text-sm">{user.name}</div>
+                                </div>
+                              </div>
+                              <div className="flex-1 relative h-12 bg-white border rounded">
+                                {/* 背景の目盛り線 */}
+                                <div className="absolute inset-0">
+                                  <div className="h-full flex">
+                                    {Array.from({ length: 24 }).map((_, i) => (
+                                      <div key={i} className="flex-1 border-l border-gray-100" />
+                                    ))}
                                   </div>
                                 </div>
-                              )}
-                              {shift.status === 'rejected' && <span className="inline-block px-1 rounded bg-red-100 text-red-600">却下</span>}
-                              {hasOverlap && <div className="text-[9px] text-yellow-700">⚠️重複</div>}
+
+                                {/* シフトバー */}
+                                <div className="relative h-full">
+                                    {shiftsForUser.length === 0 && (
+                                      <div className="absolute inset-0 flex items-center justify-center text-gray-300 text-sm">-</div>
+                                    )}
+                                    {shiftsForUser.map((s, idx) => {
+                                      if (!s.startTime || !s.endTime) return null;
+                                      const startMin = timeToMin(s.startTime);
+                                      const endMin = timeToMin(s.endTime);
+                                      if (isNaN(startMin) || isNaN(endMin)) return null;
+                                      // 正常な範囲でない（終日時が開始前）なら表示しない
+                                      if (endMin <= startMin) return null;
+                                      const leftPct = (startMin / 1440) * 100;
+                                      const widthPct = ((endMin - startMin) / 1440) * 100;
+                                      // 最小幅をパーセンテージベースで確保（視認性を高める）
+                                      const minPct = (20 / Math.max(900, 900)) * 100; // approx 20px over 900px
+                                      const finalWidthPct = Math.max(widthPct, minPct);
+                                      return (
+                                        <div key={s.id + '-' + idx} className="absolute top-1/4 h-1/2 rounded text-[12px] text-white flex items-center px-2" style={{ left: `${leftPct}%`, width: `${finalWidthPct}%`, backgroundColor: s.status === 'approved' ? '#16a34a' : s.status === 'rejected' ? '#dc2626' : '#2563eb', zIndex: 20, boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>
+                                          <div className="truncate">{s.startTime} - {s.endTime}</div>
+                                        </div>
+                                      );
+                                    })}
+                                </div>
+                              </div>
                             </div>
-                          ) : (
-                            <span className="text-gray-300">-</span>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                          );
+                          });
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
