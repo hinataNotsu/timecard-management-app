@@ -30,6 +30,7 @@ export default function ApprovedSchedulePage() {
   const [nameFilter, setNameFilter] = useState('');
   const [onlyMine, setOnlyMine] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const [selectedDayForTimeline, setSelectedDayForTimeline] = useState<Date | null>(null);
 
   useEffect(() => {
     if (!userProfile) return;
@@ -259,22 +260,50 @@ export default function ApprovedSchedulePage() {
               const holiday = JapaneseHolidays.isHoliday(day);
               const list = (grouped.get(key) || []).sort((a,b) => a.startTime.localeCompare(b.startTime));
               return (
-                <div key={idx} className={`min-h-24 p-2 border-r border-b border-gray-300 border-opacity-50 last:border-r-0 ${!isCurrentMonth?'bg-gray-50':''} ${isToday?'bg-green-50':''}`}>
+                <div
+                  key={idx}
+                  className={`min-h-24 p-2 border-r border-b border-gray-300 border-opacity-50 last:border-r-0 ${!isCurrentMonth?'bg-gray-50':''} ${isToday?'bg-green-50':''}`}
+                  onClick={() => setSelectedDayForTimeline(day)}
+                >
                   <div className={`text-sm ${!isCurrentMonth ? 'text-gray-400' : holiday || dow===0 ? 'text-red-600' : dow===6 ? 'text-blue-600' : 'text-gray-900'} ${isToday ? 'font-bold' : ''}`}>{day.getDate()}</div>
                   <div className="mt-1 space-y-1">
                     {loading ? (
                       <div className="text-xs text-gray-400">読み込み中...</div>
                     ) : list.length === 0 ? null : (
-                      list.map((s, i2) => (
-                        <div key={i2} className="w-full text-left text-xs bg-green-100 text-green-800 px-1 py-0.5 rounded truncate flex items-center gap-1">
-                          <img
-                            src={`https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(s.avatarSeed || s.userName || s.userId)}${s.avatarBgColor ? `&backgroundColor=${encodeURIComponent(s.avatarBgColor)}` : '&backgroundType=gradientLinear'}&radius=50`}
-                            alt={s.userName}
-                            className="w-4 h-4 rounded-full"
-                          />
-                          <span className="truncate">{s.startTime}-{s.endTime} {s.userName}</span>
+                      <>
+                        {/* Desktop / wide: show time and name */}
+                        <div className="hidden sm:block space-y-1">
+                          {list.map((s, i2) => (
+                            <div key={i2} className="w-full text-left text-xs bg-green-100 text-green-800 px-1 py-0.5 rounded truncate flex items-center gap-1">
+                              <img
+                                src={`https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(s.avatarSeed || s.userName || s.userId)}${s.avatarBgColor ? `&backgroundColor=${encodeURIComponent(s.avatarBgColor)}` : '&backgroundType=gradientLinear'}&radius=50`}
+                                alt={s.userName}
+                                className="w-4 h-4 rounded-full"
+                              />
+                              <span className="truncate">{s.startTime}-{s.endTime} {s.userName}</span>
+                            </div>
+                          ))}
                         </div>
-                      ))
+
+                        {/* Mobile: show avatars only, if many show "他N名" */}
+                        <div className="flex items-center gap-2 sm:hidden">
+                          {(() => {
+                            const max = 4;
+                            const slice = list.slice(0, max);
+                            const more = Math.max(0, list.length - max);
+                            return (
+                              <>
+                                {slice.map((s, i2) => (
+                                  <img key={i2} src={`https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(s.avatarSeed || s.userName || s.userId)}${s.avatarBgColor ? `&backgroundColor=${encodeURIComponent(s.avatarBgColor)}` : '&backgroundType=gradientLinear'}&radius=50`} alt={s.userName} className="w-6 h-6 rounded-full" />
+                                ))}
+                                {more > 0 && (
+                                  <div className="text-xs text-gray-600">他{more}名</div>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
+                      </>
                     )}
                   </div>
                 </div>
@@ -282,6 +311,77 @@ export default function ApprovedSchedulePage() {
             })}
           </div>
         </div>
+
+        {/* 当日の時間軸モーダル */}
+        {selectedDayForTimeline && (
+          <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
+            <div className="bg-white rounded-lg p-4 w-full max-w-4xl max-h-[90vh] overflow-auto">
+              <div className="flex items-center justify-between mb-3">
+                <div className="font-semibold">{selectedDayForTimeline.getFullYear()}年{selectedDayForTimeline.getMonth()+1}月{selectedDayForTimeline.getDate()}日のシフト（時間軸）</div>
+                <button onClick={() => setSelectedDayForTimeline(null)} className="px-3 py-1 border rounded">閉じる</button>
+              </div>
+              <div className="text-sm text-gray-600 mb-2">※ 承認済みのシフトのみ表示</div>
+              <div className="relative">
+                {/* unified vertical markers overlay spanning header and rows */}
+                <div className="absolute top-0 bottom-0 left-0 right-0 pointer-events-none">
+                  <div style={{ position: 'absolute', left: 'calc(6rem + 1rem)', right: 0, top: 0, bottom: 0 }}>
+                    {[0,6,12,18,24].map((h) => (
+                      <div key={`marker-${h}`} style={{ position: 'absolute', left: `${(h/24)*100}%`, top: 0, bottom: 0, width: '1px', background: 'rgba(156,163,175,0.9)' }} />
+                    ))}
+                  </div>
+                </div>
+
+                {/* 時間軸ヘッダー（6時間ごと: 0,6,12,18,24） */}
+                <div className="flex items-center gap-4 mb-2 relative z-10">
+                  <div className="w-24 text-sm text-gray-600">名前</div>
+                  <div className="flex-1">
+                    <div className="relative h-8">
+                      {([0,6,12,18,24] as number[]).map((h) => (
+                        <div key={h} className="absolute top-0 h-full text-xs text-gray-500 flex items-center justify-center" style={{ left: `${(h/24)*100}%`, transform: 'translateX(-50%)' }}>
+                          {h === 24 ? '24:00' : `${h.toString().padStart(2,'0')}:00`}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* シフト行 */}
+                <div className="divide-y divide-gray-300 relative z-10">
+                  {(() => {
+                    const key = formatDateKey(selectedDayForTimeline);
+                    const dayList = (grouped.get(key) || []).sort((a,b) => a.startTime.localeCompare(b.startTime));
+                    if (dayList.length === 0) return <div className="text-sm text-gray-500">この日の承認済みシフトはありません</div>;
+                    return dayList.map((s, idx) => {
+                      const toMin = (t: string) => { const [hh, mm] = t.split(':').map(Number); return hh*60+mm; };
+                      const startMin = toMin(s.startTime);
+                      const endMin = toMin(s.endTime);
+                      const leftPct = (startMin / (24*60)) * 100;
+                      const widthPct = Math.max(1, ((endMin - startMin) / (24*60)) * 100);
+                      return (
+                        <div key={idx} className="flex items-center gap-4 py-1">
+                          <div className="w-24 text-sm flex items-center gap-2">
+                            <img src={`https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(s.avatarSeed || s.userName || s.userId)}${s.avatarBgColor ? `&backgroundColor=${encodeURIComponent(s.avatarBgColor)}` : '&backgroundType=gradientLinear'}&radius=50`} alt={s.userName} className="w-6 h-6 rounded-full" />
+                            <div className="truncate">{s.userName}</div>
+                          </div>
+                          <div className="flex-1 relative">
+                            <div className="relative h-10">
+                              {/** shift bar overlay */}
+                              <div className="absolute top-1 bottom-1 left-0 right-0 pointer-events-none">
+                                <div className="absolute h-full bg-green-500 text-white rounded-md flex items-center px-2 text-xs" style={{ left: `${leftPct}%`, width: `${widthPct}%` }}>
+                                  {s.startTime}-{s.endTime}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         <style jsx global>{`
           @media print {
             @page { size: A4 landscape; margin: 12mm; }
