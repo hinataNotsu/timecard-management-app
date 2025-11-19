@@ -93,6 +93,15 @@ service cloud.firestore {
     
     // 組織コレクション
     match /organizations/{organizationId} {
+            // 申請一覧（requestsサブコレクション）
+            match /requests/{requestId} {
+              // 読み取り: 管理者のみ
+              allow read: if signedIn() && isNotDeleted() && isMember(organizationId) && isManage();
+              // 作成: 一時的に誰でも許可（認証情報切り分け用）
+              allow create: if true;
+              // 削除: 管理者のみ
+              allow delete: if signedIn() && isNotDeleted() && isMember(organizationId) && isManage();
+            }
       // 認証済みユーザーは作成可能（削除済みでない場合のみ）
       allow create: if signedIn() && isNotDeleted();
       

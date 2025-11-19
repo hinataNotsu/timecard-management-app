@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, addDoc, Timestamp, getDocs, QueryDocumentSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export default function JoinOrganizationPage() {
@@ -11,6 +11,7 @@ export default function JoinOrganizationPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState(true);
+  const [showDialog, setShowDialog] = useState(false);
   const { userProfile, updateUserProfile } = useAuth();
   const router = useRouter();
 
@@ -33,15 +34,15 @@ export default function JoinOrganizationPage() {
     try {
       const inputId = organizationId.trim();
       console.log('[Join Organization] Input ID:', inputId);
-      console.log('[Join Organization] Current user:', userProfile);
-      
+      console.log('[Join Organization] Current userProfile:', userProfile);
+
       // 組織が存在するか確認（ドキュメントIDで直接取得）
       const orgDocRef = doc(db, 'organizations', inputId);
-      console.log('[Join Organization] Fetching organization document...');
-      
+      console.log('[Join Organization] Fetching organization document...', orgDocRef.path);
+
       const orgDoc = await getDoc(orgDocRef);
       console.log('[Join Organization] Document exists:', orgDoc.exists());
-      
+
       if (!orgDoc.exists()) {
         console.log('[Join Organization] Organization not found');
         setError('入力された企業IDが見つかりません。正しいIDを入力してください。');
@@ -49,32 +50,35 @@ export default function JoinOrganizationPage() {
         return;
       }
 
-      const orgData = orgDoc.data();
-      console.log('[Join Organization] Organization data:', orgData);
-
-      // ユーザープロフィールに組織IDを追加（配列に追加）
-      console.log('[Join Organization] Updating user profile...');
-      const currentOrgIds = userProfile?.organizationIds || [];
-      
-      // 既に所属している場合はスキップ
-      if (currentOrgIds.includes(inputId)) {
-        setError('既にこの組織に所属しています');
+      if (!userProfile?.uid) {
+        console.log('[Join Organization] userProfile.uid is missing');
+        setError('ユーザー情報が取得できませんでした');
         setLoading(false);
         return;
       }
-      
-      await updateUserProfile({
-        organizationIds: [...currentOrgIds, inputId],
-        currentOrganizationId: inputId, // 追加した組織を現在の組織として設定
-      });
 
-      console.log('[Join Organization] Profile updated successfully, redirecting...');
-      window.location.href = '/dashboard/part-time';
+      // 既に登録済みかどうかチェック
+      if (userProfile.organizationIds && userProfile.organizationIds.includes(inputId)) {
+        console.log('[Join Organization] Already registered organizationId:', inputId);
+        setError('既に登録済みの企業IDです。');
+        setLoading(false);
+        return;
+      }
+
+      // userコレクションのorganizationIdsに企業IDを追加
+      const userDocRef = doc(db, 'users', userProfile.uid);
+      const newOrgIds = [...(userProfile.organizationIds || []), inputId];
+      console.log('[Join Organization] Updating userDoc:', userDocRef.path, newOrgIds);
+      await updateDoc(userDocRef, {
+        organizationIds: newOrgIds,
+        currentOrganizationId: inputId,
+        updatedAt: Timestamp.now(),
+      });
+      console.log('[Join Organization] Update successful, navigating to dashboard/part-time');
+      router.push('/dashboard/part-time');
     } catch (err: any) {
       console.error('[Join Organization] Error:', err);
-      console.error('[Join Organization] Error code:', err.code);
-      console.error('[Join Organization] Error message:', err.message);
-      setError(`組織への参加に失敗しました: ${err.message}`);
+      setError(`登録に失敗しました: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -133,10 +137,24 @@ export default function JoinOrganizationPage() {
               disabled={loading}
               className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
-              {loading ? '確認中...' : '参加する'}
+                {loading ? '登録中...' : '登録する'}
             </button>
           </div>
         </form>
+        {showDialog && (
+          <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-30 z-50">
+            <div className="bg-white rounded-lg shadow-lg p-8 max-w-sm w-full text-center">
+              <h3 className="text-xl font-bold mb-4">申請しました</h3>
+              <p className="mb-6">企業への参加申請が送信されました。管理者の承認をお待ちください。</p>
+              <button
+                className="px-6 py-2 bg-blue-600 text-white rounded-md font-semibold hover:bg-blue-700"
+                onClick={() => router.push('/')}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

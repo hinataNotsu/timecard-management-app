@@ -108,6 +108,24 @@ export default function CompanyDashboard() {
         </div>
       </header>
 
+      {/* 企業ID表示コンテナ */}
+      {userProfile?.currentOrganizationId && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-blue-700 font-semibold">企業ID：</span>
+              <span className="text-sm font-mono text-blue-900 select-all break-all">{userProfile.currentOrganizationId}</span>
+            </div>
+            <button
+              className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+              onClick={() => navigator.clipboard.writeText(userProfile.currentOrganizationId ?? "")}
+            >
+              コピー
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* メインコンテンツ */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

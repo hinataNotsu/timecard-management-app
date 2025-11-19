@@ -24,12 +24,7 @@ export default function OrganizationMembersPage() {
   const [saving, setSaving] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   
-  // ユーザー追加用
-  const [showAddUser, setShowAddUser] = useState(false);
-  const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserPassword, setNewUserPassword] = useState('');
-  const [newUserDisplayName, setNewUserDisplayName] = useState('');
-  const [adding, setAdding] = useState(false);
+  // ...existing code...
 
   const orgId = userProfile?.currentOrganizationId;
 
@@ -237,75 +232,20 @@ export default function OrganizationMembersPage() {
           <div className="flex items-center gap-4">
             <h1 className="text-2xl font-bold">メンバー管理</h1>
             <button
-              onClick={() => setShowAddUser(!showAddUser)}
-              className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+              onClick={() => router.push('/organization/requests')}
+              className="ml-4 relative flex items-center justify-center w-7 h-7 bg-blue-100 rounded-full hover:bg-blue-200 transition"
+              title="申請一覧"
+              style={{ marginLeft: '16px' }}
             >
-              {showAddUser ? 'キャンセル' : '+ ユーザー追加'}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v4l3 3" />
+              </svg>
             </button>
           </div>
           <button onClick={() => router.push('/dashboard/company')} className="text-sm text-gray-600 hover:text-gray-900">← ダッシュボード</button>
         </div>
-
-        {showAddUser && (
-          <div className="mb-6 bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">新規ユーザー追加</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">メールアドレス *</label>
-                <input
-                  type="email"
-                  value={newUserEmail}
-                  onChange={(e) => setNewUserEmail(e.target.value)}
-                  className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="example@company.com"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">初期パスワード *（6文字以上）</label>
-                <input
-                  type="password"
-                  value={newUserPassword}
-                  onChange={(e) => setNewUserPassword(e.target.value)}
-                  className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="初期パスワード"
-                />
-                <p className="mt-1 text-xs text-gray-500">※ ユーザーには初回ログイン時にパスワード変更を促します</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">表示名（任意）</label>
-                <input
-                  type="text"
-                  value={newUserDisplayName}
-                  onChange={(e) => setNewUserDisplayName(e.target.value)}
-                  className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="山田 太郎"
-                                  maxLength={30}
-                />
-                <p className="mt-1 text-xs text-gray-500">※ 空欄の場合はメールアドレスから自動生成されます</p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleAddUser}
-                  disabled={adding}
-                  className={`flex-1 px-4 py-2 rounded ${adding ? 'bg-gray-300 text-gray-600' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
-                >
-                  {adding ? '作成中...' : 'ユーザーを作成'}
-                </button>
-                <button
-                  onClick={() => {
-                    setShowAddUser(false);
-                    setNewUserEmail('');
-                    setNewUserPassword('');
-                    setNewUserDisplayName('');
-                  }}
-                  className="px-4 py-2 rounded bg-gray-200 text-gray-700 hover:bg-gray-300"
-                >
-                  キャンセル
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* ...existing code... */}
 
         <div className="bg-white rounded-lg shadow overflow-hidden">
           <table className="w-full text-sm">
