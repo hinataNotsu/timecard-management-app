@@ -11,6 +11,7 @@ export default function CompanyDashboard() {
   const { userProfile, loading, signOut } = useAuth();
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [staffCount, setStaffCount] = useState<number>(0);
+  const [copied, setCopied] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -116,12 +117,18 @@ export default function CompanyDashboard() {
               <span className="text-sm text-blue-700 font-semibold">企業ID：</span>
               <span className="text-sm font-mono text-blue-900 select-all break-all">{userProfile.currentOrganizationId}</span>
             </div>
-            <button
-              className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-              onClick={() => navigator.clipboard.writeText(userProfile.currentOrganizationId ?? "")}
-            >
-              コピー
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                className={`px-2 py-1 text-xs rounded transition ${copied ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700 hover:bg-blue-200'}`}
+                onClick={async () => {
+                  await navigator.clipboard.writeText(userProfile.currentOrganizationId ?? "");
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                }}
+              >
+                {copied ? 'コピーしました！' : 'コピー'}
+              </button>
+            </div>
           </div>
         </div>
       )}
