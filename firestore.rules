@@ -68,25 +68,33 @@ service cloud.firestore {
       // 作成: 誰でも（signedInのみ）
       allow create: if signedIn();
 
-      // 更新: 自分のドキュメント もしくは 管理者による所属組織の解除のみ許可
+      // 更新: 自分のドキュメント もしくは 管理者による所属組織の追加・解除を許可
       allow update: if signedIn() && (
-        // 自分自身の更新は許可（削除済みでない場合のみ）
+        // 自分自身の更新は許可(削除済みでない場合のみ)
         (request.auth.uid == userId && isNotDeleted()) || (
-          // 管理者による、現在の組織からターゲットユーザーを外す更新のみ許可
+          // 管理者による組織メンバーの追加・削除を許可
           isManage() &&
           isNotDeleted() &&
           currentUserData().currentOrganizationId != null &&
           isMember(currentUserData().currentOrganizationId) &&
-          // 対象ユーザーがその組織に所属していること
-          ('organizationIds' in resource.data) &&
-          resource.data.organizationIds != null &&
-          resource.data.organizationIds.hasAny([currentUserData().currentOrganizationId]) &&
-          // 変更はorganizationIdsのみに限定
-          request.resource.data.diff(resource.data).changedKeys().hasOnly(['organizationIds']) &&
-          // サイズは1だけ減少（=追加は不可）
-          request.resource.data.organizationIds.size() == resource.data.organizationIds.size() - 1 &&
-          // 更新後に currentOrganizationId が含まれていないこと（=その組織からの除外）
-          !request.resource.data.organizationIds.hasAny([currentUserData().currentOrganizationId])
+          // 変更はorganizationIds と currentOrganizationId のみに限定
+          request.resource.data.diff(resource.data).changedKeys().hasOnly(['organizationIds', 'currentOrganizationId', 'updatedAt']) &&
+          (
+            // パターン1: organizationIds に管理者の組織を追加する場合
+            (
+              request.resource.data.organizationIds.size() == resource.data.organizationIds.size() + 1 &&
+              request.resource.data.organizationIds.hasAny([currentUserData().currentOrganizationId]) &&
+              !resource.data.organizationIds.hasAny([currentUserData().currentOrganizationId])
+            ) ||
+            // パターン2: organizationIds から管理者の組織を削除する場合
+            (
+              ('organizationIds' in resource.data) &&
+              resource.data.organizationIds != null &&
+              resource.data.organizationIds.hasAny([currentUserData().currentOrganizationId]) &&
+              request.resource.data.organizationIds.size() == resource.data.organizationIds.size() - 1 &&
+              !request.resource.data.organizationIds.hasAny([currentUserData().currentOrganizationId])
+            )
+          )
         )
       );
     }
@@ -102,6 +110,9 @@ service cloud.firestore {
               // 削除: 管理者のみ
               allow delete: if signedIn() && isNotDeleted() && isMember(organizationId) && isManage();
             }
+        // 申請リスト: permissionList[] フィールド
+        // permissionList の読み書きは authenticated user なら許可
+        allow read, update: if signedIn() && isNotDeleted();
       // 認証済みユーザーは作成可能（削除済みでない場合のみ）
       allow create: if signedIn() && isNotDeleted();
       
@@ -118,9 +129,10 @@ service cloud.firestore {
       match /members/{userId} {
         // 読み取り: 同一組織のメンバー かつ (管理者 または 本人) / 削除済みでない
         allow read: if signedIn() && isNotDeleted() && isMember(organizationId) && (isManage() || request.auth.uid == userId);
-        
-        // 書き込み: 管理者かつ同一組織のメンバー、削除済みでない場合のみ
-        allow create, update, delete: if signedIn() && isNotDeleted() && isMember(organizationId) && isManage();
+        // 申請（create）は認証済みユーザーなら誰でも許可
+        allow create: if signedIn() && isNotDeleted();
+        // 更新・削除は管理者かつ同一組織のメンバーのみ
+        allow update, delete: if signedIn() && isNotDeleted() && isMember(organizationId) && isManage();
       }
     }
     

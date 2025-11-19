@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { doc, getDoc, collection, addDoc, Timestamp, getDocs, QueryDocumentSnapshot, updateDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { doc, getDoc, setDoc, collection, addDoc, Timestamp, getDocs, QueryDocumentSnapshot, updateDoc, arrayUnion } from 'firebase/firestore';
+import { db, auth } from '@/lib/firebase';
 
 export default function JoinOrganizationPage() {
   const [organizationId, setOrganizationId] = useState('');
@@ -32,59 +32,57 @@ export default function JoinOrganizationPage() {
     setLoading(true);
 
     try {
+      console.log('[Join Organization] Firebase Auth currentUser:', auth.currentUser);
+      console.log('[Join Organization] UserProfile:', userProfile);
+      console.log('[Join Organization] UserProfile.displayName:', userProfile?.displayName);
+      console.log('[Join Organization] UserProfile.email:', userProfile?.email);
       const inputId = organizationId.trim();
-      console.log('[Join Organization] Input ID:', inputId);
-      console.log('[Join Organization] Current userProfile:', userProfile);
-
-      // 組織が存在するか確認（ドキュメントIDで直接取得）
+      if (!inputId) {
+        setError('企業IDを入力してください');
+        setLoading(false);
+        return;
+      }
+      // 組織が存在するか確認
       const orgDocRef = doc(db, 'organizations', inputId);
-      console.log('[Join Organization] Fetching organization document...', orgDocRef.path);
-
       const orgDoc = await getDoc(orgDocRef);
-      console.log('[Join Organization] Document exists:', orgDoc.exists());
-
       if (!orgDoc.exists()) {
-        console.log('[Join Organization] Organization not found');
         setError('入力された企業IDが見つかりません。正しいIDを入力してください。');
         setLoading(false);
         return;
       }
-
+      // permissionListに既に申請があるかチェック
       if (!userProfile?.uid) {
-        console.log('[Join Organization] userProfile.uid is missing');
-        setError('ユーザー情報が取得できませんでした');
+        setError('ユーザー情報が取得できませんでした。権限がありません。再度ログインしてください。');
         setLoading(false);
         return;
       }
-
-      // 既に登録済みかどうかチェック
-      if (userProfile.organizationIds && userProfile.organizationIds.includes(inputId)) {
-        console.log('[Join Organization] Already registered organizationId:', inputId);
-        setError('既に登録済みの企業IDです。');
+      const orgData = orgDoc.data();
+      const permissionList = Array.isArray(orgData.permissionList) ? orgData.permissionList : [];
+      const alreadyRequested = permissionList.some((p: any) => p.uid === userProfile.uid);
+      if (alreadyRequested) {
+        setError('既に申請中です');
         setLoading(false);
         return;
       }
-
-      // userコレクションのorganizationIdsに企業IDを追加
-      const userDocRef = doc(db, 'users', userProfile.uid);
-      const newOrgIds = [...(userProfile.organizationIds || []), inputId];
-      console.log('[Join Organization] Updating userDoc:', userDocRef.path, newOrgIds);
-      await updateDoc(userDocRef, {
-        organizationIds: newOrgIds,
-        currentOrganizationId: inputId,
-        updatedAt: Timestamp.now(),
+      // permissionListに申請データを追加
+      const applicationData = {
+        uid: userProfile.uid,
+        displayName: userProfile.displayName || '',
+        email: userProfile.email || '',
+        createdAt: Timestamp.now(),
+      };
+      console.log('[Join Organization] Application data to save:', applicationData);
+      await updateDoc(orgDocRef, {
+        permissionList: arrayUnion(applicationData)
       });
-      console.log('[Join Organization] Update successful, refreshing userProfile...');
-      if (typeof updateUserProfile === 'function') {
-        await updateUserProfile({
-          organizationIds: newOrgIds,
-          currentOrganizationId: inputId,
-        });
-      }
-      router.push('/dashboard/part-time');
+      setShowDialog(true);
     } catch (err: any) {
-      console.error('[Join Organization] Error:', err);
-      setError(`登録に失敗しました: ${err.message}`);
+      console.error('[Join Organization] Error details:', err);
+      const errorDetails = `
+エラーコード: ${err.code || 'unknown'}
+メッセージ: ${err.message}
+詳細: ${JSON.stringify(err, null, 2)}`;
+      setError(`申請に失敗しました: ${err.message}${errorDetails}`);
     } finally {
       setLoading(false);
     }
@@ -143,25 +141,26 @@ export default function JoinOrganizationPage() {
               disabled={loading}
               className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
-                {loading ? '登録中...' : '登録する'}
+                {loading ? '申請中...' : '申請する'}
             </button>
           </div>
         </form>
-        {showDialog && (
-          <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-30 z-50">
-            <div className="bg-white rounded-lg shadow-lg p-8 max-w-sm w-full text-center">
-              <h3 className="text-xl font-bold mb-4">申請しました</h3>
-              <p className="mb-6">企業への参加申請が送信されました。管理者の承認をお待ちください。</p>
-              <button
-                className="px-6 py-2 bg-blue-600 text-white rounded-md font-semibold hover:bg-blue-700"
-                onClick={() => router.push('/')}
-              >
-                OK
-              </button>
-            </div>
-          </div>
-        )}
       </div>
+      {showDialog && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/30 z-50">
+          <div className="bg-white rounded-lg shadow-lg p-8 max-w-sm w-full text-center">
+            <h3 className="text-xl font-bold mb-4">申請しました</h3>
+            <p className="mb-6">管理者が承認するまでお待ちください。</p>
+            <button
+              className="px-6 py-2 bg-blue-600 text-white rounded-md font-semibold hover:bg-blue-700"
+              onClick={() => {
+                setShowDialog(false);
+                router.push('/');
+              }}
+            >OK</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
