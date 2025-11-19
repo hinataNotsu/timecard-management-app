@@ -1,3 +1,5 @@
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+
 # タイムカード管理システム
 
 Next.js + Firebase で構築された、アルバイトスタッフ向けのシフト・勤怠・給与管理システムです。
