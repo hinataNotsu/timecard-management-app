@@ -584,6 +584,10 @@ export default function ShiftSubmitPage() {
                   }`}>{day.getDate()}</div>
                 </div>
                 <div className="relative">
+                  {/** vertical markers at 6/12/18/24 for day column */}
+                  {[6,12,18,24].map((h) => (
+                    <div key={`marker-${h}`} className="absolute top-0 bottom-0" style={{ left: `${(h/24)*100}%`, width: '1px', background: 'rgba(156,163,175,0.9)' }} />
+                  ))}
                   {hours.map((hour, hourIndex) => (
                     <div
                       key={hour}
@@ -611,28 +615,28 @@ export default function ShiftSubmitPage() {
                     const top = (startHour + startMin / 60) * 48;
                     const height = ((endHour + endMin / 60) - (startHour + startMin / 60)) * 48;
 
-                    return (
-                      <div
-                        key={shift.id}
-                        className={`absolute left-1 right-1 ${classesForStatus(shift.status, 'block')} text-xs p-1 rounded overflow-hidden ${!canSubmitForDate(new Date(shift.date)) ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
-                        style={{ top: `${top}px`, height: `${height}px` }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!canSubmitForDate(new Date(shift.date))) return;
-                          setEditingId(shift.id!);
-                          setNewShift({
-                            date: shift.date,
-                            startTime: shift.startTime,
-                            endTime: shift.endTime,
-                            note: shift.note ?? '',
-                          });
-                          setIsAddingShift(true);
-                        }}
-                      >
-                        <div className="font-semibold">{shift.startTime}-{shift.endTime}</div>
-                        {shift.note && <div className="truncate">{shift.note}</div>}
-                      </div>
-                    );
+                            return (
+                              <div
+                                key={shift.id}
+                                className={`absolute left-1 right-1 ${classesForStatus(shift.status, 'block')} text-xs p-1 rounded-md overflow-hidden ${!canSubmitForDate(new Date(shift.date)) ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
+                                style={{ top: `${top}px`, height: `${height}px` }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!canSubmitForDate(new Date(shift.date))) return;
+                                  setEditingId(shift.id!);
+                                  setNewShift({
+                                    date: shift.date,
+                                    startTime: shift.startTime,
+                                    endTime: shift.endTime,
+                                    note: shift.note ?? '',
+                                  });
+                                  setIsAddingShift(true);
+                                }}
+                              >
+                                <div className="font-semibold">{shift.startTime}-{shift.endTime}</div>
+                                {shift.note && <div className="truncate">{shift.note}</div>}
+                              </div>
+                            );
                   })}
                 </div>
               </div>
@@ -667,6 +671,10 @@ export default function ShiftSubmitPage() {
             ))}
           </div>
           <div className="relative border-r border-gray-300 border-opacity-50">
+            {/** vertical markers at 6/12/18/24 for day view timeline */}
+            {[6,12,18,24].map((h) => (
+              <div key={`dmarker-${h}`} className="absolute top-0 bottom-0" style={{ left: `${(h/24)*100}%`, width: '1px', background: 'rgba(156,163,175,0.9)' }} />
+            ))}
             <div className={`h-12 border-b border-gray-300 border-opacity-50 p-2 text-center font-semibold ${
               holiday || dayOfWeek === 0 ? 'text-red-600' : dayOfWeek === 6 ? 'text-blue-600' : ''
             }`}>
