@@ -31,6 +31,25 @@ function TimecardPageContent() {
   const [record, setRecord] = useState<TimecardRecord | null>(null);
   const [now, setNow] = useState<Date | null>(null);
   const [userName, setUserName] = useState<string>('');
+  const [isWatchAdmin, setIsWatchAdmin] = useState<boolean | null>(null);
+
+  // 組織設定のisWatchAdminをチェック
+  useEffect(() => {
+    const checkOrgSettings = async () => {
+      if (!userProfile?.currentOrganizationId) return;
+      try {
+        const orgDoc = await getDoc(doc(db, 'organizations', userProfile.currentOrganizationId));
+        if (orgDoc.exists()) {
+          const orgData = orgDoc.data();
+          const watchAdmin = orgData.isWatchAdmin !== false; // デフォルトtrue
+          setIsWatchAdmin(watchAdmin);
+        }
+      } catch (error) {
+        console.error('[Timecard] Error checking org settings:', error);
+      }
+    };
+    checkOrgSettings();
+  }, [userProfile?.currentOrganizationId]);
 
   // アクセス制御
   useEffect(() => {
@@ -46,7 +65,11 @@ function TimecardPageContent() {
       router.push('/organization/timecards/users');
       return;
     }
-  }, [userProfile, authLoading, userId, router]);
+    // isWatchAdminがfalseの場合、このページにアクセスできない
+    if (isWatchAdmin === false) {
+      router.push('/dashboard/company');
+    }
+  }, [userProfile, authLoading, userId, isWatchAdmin, router]);
 
   // ユーザー名を取得
   useEffect(() => {
@@ -331,16 +354,10 @@ function TimecardPageContent() {
                 {hours}時間 {minutes}分
               </span>
             </div>
-            <div className="flex justify-between border-b pb-2">
+            <div className="flex justify-between">
               <span className="text-gray-600">休憩時間</span>
               <span className="font-mono font-bold text-yellow-600">
                 {Math.floor(breakMinutes / 60)}時間 {breakMinutes % 60}分
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">時給</span>
-              <span className="font-mono font-bold">
-                ¥{record?.hourlyWage?.toLocaleString() || '---'}
               </span>
             </div>
           </div>

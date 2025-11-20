@@ -27,6 +27,7 @@ export default function TimecardPage() {
   const [loading, setLoading] = useState(true);
   const [record, setRecord] = useState<TimecardRecord | null>(null);
   const [now, setNow] = useState<Date | null>(null);
+  const [isWatchAdmin, setIsWatchAdmin] = useState<boolean | null>(null);
 
   // live clock
   useEffect(() => {
@@ -36,13 +37,37 @@ export default function TimecardPage() {
     return () => clearInterval(t);
   }, []);
 
+  // 組織設定のisWatchAdminをチェック
+  useEffect(() => {
+    const checkOrgSettings = async () => {
+      if (!userProfile?.currentOrganizationId) return;
+      try {
+        const orgDoc = await getDoc(doc(db, 'organizations', userProfile.currentOrganizationId));
+        if (orgDoc.exists()) {
+          const orgData = orgDoc.data();
+          const watchAdmin = orgData.isWatchAdmin !== false; // デフォルトtrue
+          setIsWatchAdmin(watchAdmin);
+        }
+      } catch (error) {
+        console.error('[Timecard] Error checking org settings:', error);
+      }
+    };
+    checkOrgSettings();
+  }, [userProfile?.currentOrganizationId]);
+
   // access control
   useEffect(() => {
     if (!userProfile) return;
-    if (userProfile.isManage) {
-      router.push('/dashboard/company');
+    
+    // isWatchAdminの読み込みが完了するまで待つ
+    if (isWatchAdmin === null) return;
+    
+    // isWatchAdminがtrueの場合、アルバイトはタイムカードにアクセスできない
+    // ただし管理者(isManage=true)は除外
+    if (isWatchAdmin === true && !userProfile.isManage) {
+      router.push('/dashboard/part-time');
     }
-  }, [userProfile, router]);
+  }, [userProfile, isWatchAdmin, router]);
 
   const dateKey = useMemo(() => {
     const d = new Date();
