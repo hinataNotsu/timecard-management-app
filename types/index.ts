@@ -15,6 +15,8 @@ export interface User {
   deletedAt?: Timestamp; // 削除日時
   requirePasswordChange?: boolean; // パスワード変更が必要
   profileCompleted?: boolean; // 初回プロフィール登録が完了しているか
+  avatarSeed?: string; // アバターシード
+  avatarBackgroundColor?: string; // アバター背景色
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

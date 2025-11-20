@@ -34,6 +34,7 @@ export default function PartTimeDashboard() {
     holidayPremiumRate: number;
     holidayIncludesWeekend: boolean;
     transportAllowanceEnabled: boolean;
+    isWatchAdmin: boolean;
   } | null>(null);
   const [myTransportPerShift, setMyTransportPerShift] = useState<number>(0);
 
@@ -71,6 +72,7 @@ export default function PartTimeDashboard() {
               holidayPremiumRate: Number(o.holidayPremiumRate ?? 0.35),
               holidayIncludesWeekend: o.holidayIncludesWeekend ?? true,
               transportAllowanceEnabled: !!o.transportAllowanceEnabled,
+              isWatchAdmin: o.isWatchAdmin !== false, // デフォルトtrue
             });
           }
         } catch {}
@@ -258,17 +260,19 @@ export default function PartTimeDashboard() {
             <p className="text-sm text-gray-600">対象シフト: {(estimate.minutes / 60).toFixed(1)}時間</p>
           </div>
 
-          {/* タイムカードカード */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">タイムカード</h2>
-            <p className="text-gray-600 mb-4">出退勤の打刻</p>
-            <button
-              onClick={() => router.push('/dashboard/part-time/timecard')}
-              className="w-full px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition"
-            >
-              タイムカードページへ
-            </button>
-          </div>
+          {/* タイムカードカード - isWatchAdminがfalseの時のみ表示 */}
+          {orgSettings && !orgSettings.isWatchAdmin && (
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">タイムカード</h2>
+              <p className="text-gray-600 mb-4">出退勤の打刻</p>
+              <button
+                onClick={() => router.push('/dashboard/part-time/timecard')}
+                className="w-full px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition"
+              >
+                タイムカードページへ
+              </button>
+            </div>
+          )}
 
           {/* プロフィールカード */}
           <div className="bg-white rounded-lg shadow p-6">
