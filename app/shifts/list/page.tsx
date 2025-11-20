@@ -180,6 +180,19 @@ export default function AdminShiftListPage() {
             const userId = userRefPath.split('/').pop();
             if (!userId) continue;
             const { name: userName, seed: avatarSeed, bgColor: avatarBgColor } = await getUserInfo(userId);
+            
+            // originalStartTime/originalEndTimeが存在しない場合、現在の値をFirestoreに保存
+            if (!data.originalStartTime || !data.originalEndTime) {
+              try {
+                await updateDoc(d.ref, {
+                  originalStartTime: data.startTime,
+                  originalEndTime: data.endTime,
+                });
+              } catch (e) {
+                console.warn('Failed to set original times for shift', d.id, e);
+              }
+            }
+            
             rows.push({
               id: d.id,
               userId,
@@ -415,6 +428,18 @@ export default function AdminShiftListPage() {
           console.warn('failed to read approver', e);
         }
 
+        // originalStartTime/originalEndTimeが存在しない場合、現在の値をFirestoreに保存
+        if (!data.originalStartTime || !data.originalEndTime) {
+          try {
+            await updateDoc(d.ref, {
+              originalStartTime: data.startTime,
+              originalEndTime: data.endTime,
+            });
+          } catch (e) {
+            console.warn('Failed to set original times for shift', d.id, e);
+          }
+        }
+        
         rows.push({
           id: d.id,
           userId,
