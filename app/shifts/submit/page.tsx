@@ -305,6 +305,8 @@ export default function ShiftSubmitPage() {
         date: dateTs,
         startTime: newShift.startTime,
         endTime: newShift.endTime,
+        originalStartTime: newShift.startTime, // 元の希望時間を保存
+        originalEndTime: newShift.endTime, // 元の希望時間を保存
         note: newShift.note ?? '',
         hourlyWage: orgDefaultHourlyWage,
         status: 'pending',

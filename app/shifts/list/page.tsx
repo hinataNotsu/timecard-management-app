@@ -17,6 +17,8 @@ interface ShiftRow {
   date: Date;
   startTime: string;
   endTime: string;
+  originalStartTime?: string; // 提出時の元の開始時刻
+  originalEndTime?: string; // 提出時の元の終了時刻
   note?: string;
   hourlyWage?: number;
   status?: 'pending' | 'approved' | 'rejected';
@@ -41,6 +43,10 @@ export default function AdminShiftListPage() {
   const [dayLoading, setDayLoading] = useState(false);
   const [orgSettings, setOrgSettings] = useState<{ defaultHourlyWage: number; nightPremiumEnabled: boolean; nightPremiumRate: number; nightStart: string; nightEnd: string } | null>(null);
   const [allOrgUsers, setAllOrgUsers] = useState<{ id: string; name: string; seed?: string; bgColor?: string }[]>([]);
+  const [editedShifts, setEditedShifts] = useState<Map<string, { startTime: string; endTime: string }>>(new Map());
+  const [saving, setSaving] = useState(false);
+  const [editingShiftId, setEditingShiftId] = useState<string | null>(null);
+  const [editModalTime, setEditModalTime] = useState<{ startTime: string; endTime: string }>({ startTime: '', endTime: '' });
 
   useEffect(() => {
     if (!userProfile?.isManage) {
@@ -183,6 +189,8 @@ export default function AdminShiftListPage() {
               date: dateTs.toDate(),
               startTime: data.startTime,
               endTime: data.endTime,
+              originalStartTime: data.originalStartTime || data.startTime, // 元の希望時間を保存
+              originalEndTime: data.originalEndTime || data.endTime, // 元の希望時間を保存
               note: data.note || '',
               hourlyWage: data.hourlyWage != null ? Number(data.hourlyWage) : undefined,
               status: (data.status as any) || 'pending',
@@ -239,6 +247,84 @@ export default function AdminShiftListPage() {
     const base = `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(seed)}`;
     const params = bgColor ? `&backgroundColor=${encodeURIComponent(bgColor)}` : '&backgroundType=gradientLinear';
     return `${base}${params}&fontWeight=700&radius=50`;
+  };
+
+  // 編集内容の一括保存
+  const saveChanges = async () => {
+    if (editedShifts.size === 0) return;
+    
+    // 希望時間外チェック
+    const outOfRangeShifts: Array<{ shiftId: string; userName: string; original: string; modified: string }> = [];
+    for (const [shiftId, times] of editedShifts.entries()) {
+      const shift = dayShifts.find(s => s.id === shiftId);
+      if (!shift) continue;
+      
+      const originalStart = shift.originalStartTime || shift.startTime;
+      const originalEnd = shift.originalEndTime || shift.endTime;
+      const newStart = times.startTime;
+      const newEnd = times.endTime;
+      
+      // 希望時間外に延ばされているかチェック
+      if (newStart < originalStart || newEnd > originalEnd) {
+        outOfRangeShifts.push({
+          shiftId,
+          userName: shift.userName,
+          original: `${originalStart}-${originalEnd}`,
+          modified: `${newStart}-${newEnd}`
+        });
+      }
+    }
+    
+    // 希望時間外のシフトがあれば確認
+    if (outOfRangeShifts.length > 0) {
+      const message = `以下のシフトが希望外の時間を含んでいます。保存してよろしいですか？\n\n${outOfRangeShifts.map(s => `${s.userName} (${s.original} → ${s.modified})`).join('\n')}`;
+      if (!confirm(message)) {
+        // キャンセルされた場合、希望時間外のシフトを元の希望時間に戻す
+        const newEditedShifts = new Map(editedShifts);
+        for (const item of outOfRangeShifts) {
+          const shift = dayShifts.find(s => s.id === item.shiftId);
+          if (shift) {
+            const originalStart = shift.originalStartTime || shift.startTime;
+            const originalEnd = shift.originalEndTime || shift.endTime;
+            const currentEdit = newEditedShifts.get(item.shiftId);
+            if (currentEdit) {
+              // 希望時間内に収まるように調整
+              let adjustedStart = currentEdit.startTime;
+              let adjustedEnd = currentEdit.endTime;
+              
+              if (adjustedStart < originalStart) adjustedStart = originalStart;
+              if (adjustedEnd > originalEnd) adjustedEnd = originalEnd;
+              
+              newEditedShifts.set(item.shiftId, { startTime: adjustedStart, endTime: adjustedEnd });
+            }
+          }
+        }
+        setEditedShifts(newEditedShifts);
+        return;
+      }
+    }
+    
+    setSaving(true);
+    try {
+      for (const [shiftId, times] of editedShifts.entries()) {
+        const shiftRef = doc(db, 'shifts', shiftId);
+        await updateDoc(shiftRef, {
+          startTime: times.startTime,
+          endTime: times.endTime,
+        });
+      }
+      setEditedShifts(new Map());
+      // 選択日のシフトを再読み込み
+      if (selectedDay) {
+        await fetchDayShifts(selectedDay);
+      }
+      alert('シフトを保存しました');
+    } catch (error) {
+      console.error('Save error:', error);
+      alert('保存に失敗しました');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // 給与計算ヘルパー
@@ -338,6 +424,8 @@ export default function AdminShiftListPage() {
           date: dateTs.toDate(),
           startTime: data.startTime,
           endTime: data.endTime,
+          originalStartTime: data.originalStartTime || data.startTime, // 元の希望時間を保存
+          originalEndTime: data.originalEndTime || data.endTime, // 元の希望時間を保存
           note: data.note || '',
           hourlyWage: data.hourlyWage != null ? Number(data.hourlyWage) : undefined,
           status: (data.status as any) || 'pending',
@@ -540,8 +628,17 @@ export default function AdminShiftListPage() {
               <div className="mt-4 border-t pt-4">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="font-semibold">{selectedDay.getFullYear()}年{selectedDay.getMonth() + 1}月{selectedDay.getDate()}日 のシフト（時間軸）</div>
-                  <div>
-                    <button onClick={() => { setSelectedDay(null); setDayShifts([]); }} className="px-2 py-1 border rounded text-sm">閉じる</button>
+                  <div className="flex items-center gap-2">
+                    {editedShifts.size > 0 && (
+                      <button
+                        onClick={saveChanges}
+                        disabled={saving}
+                        className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm font-semibold"
+                      >
+                        {saving ? '保存中...' : `変更を保存 (${editedShifts.size})`}
+                      </button>
+                    )}
+                    <button onClick={() => { setSelectedDay(null); setDayShifts([]); setEditedShifts(new Map()); }} className="px-2 py-1 border rounded text-sm">閉じる</button>
                   </div>
                 </div>
                 {dayLoading ? (
@@ -603,19 +700,86 @@ export default function AdminShiftListPage() {
                                     )}
                                     {shiftsForUser.map((s, idx) => {
                                       if (!s.startTime || !s.endTime) return null;
-                                      const startMin = timeToMin(s.startTime);
-                                      const endMin = timeToMin(s.endTime);
+                                      
+                                      const minToTime = (min: number) => {
+                                        const h = Math.floor(min / 60);
+                                        const m = min % 60;
+                                        return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+                                      };
+                                      const roundTo15 = (min: number) => Math.round(min / 15) * 15;
+                                      
+                                      const edited = editedShifts.get(s.id);
+                                      const displayStart = edited?.startTime || s.startTime;
+                                      const displayEnd = edited?.endTime || s.endTime;
+                                      const startMin = timeToMin(displayStart);
+                                      const endMin = timeToMin(displayEnd);
+                                      
                                       if (isNaN(startMin) || isNaN(endMin)) return null;
-                                      // 正常な範囲でない（終日時が開始前）なら表示しない
                                       if (endMin <= startMin) return null;
+                                      
                                       const leftPct = (startMin / 1440) * 100;
                                       const widthPct = ((endMin - startMin) / 1440) * 100;
-                                      // 最小幅をパーセンテージベースで確保（視認性を高める）
-                                      const minPct = (20 / Math.max(900, 900)) * 100; // approx 20px over 900px
+                                      const minPct = (20 / Math.max(900, 900)) * 100;
                                       const finalWidthPct = Math.max(widthPct, minPct);
+                                      
+                                      const handleDragStart = (e: React.MouseEvent, edge: 'start' | 'end') => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        const timeline = e.currentTarget.parentElement?.parentElement;
+                                        if (!timeline) return;
+                                        const rect = timeline.getBoundingClientRect();
+                                        const totalWidth = rect.width;
+                                        
+                                        const onMouseMove = (moveEvent: MouseEvent) => {
+                                          const offsetX = moveEvent.clientX - rect.left;
+                                          const pct = Math.max(0, Math.min(100, (offsetX / totalWidth) * 100));
+                                          const minutes = roundTo15((pct / 100) * 24 * 60);
+                                          
+                                          if (edge === 'start') {
+                                            if (minutes < endMin) {
+                                              setEditedShifts(prev => new Map(prev).set(s.id, { startTime: minToTime(minutes), endTime: displayEnd }));
+                                            }
+                                          } else {
+                                            if (minutes > startMin) {
+                                              setEditedShifts(prev => new Map(prev).set(s.id, { startTime: displayStart, endTime: minToTime(minutes) }));
+                                            }
+                                          }
+                                        };
+                                        
+                                        const onMouseUp = () => {
+                                          document.removeEventListener('mousemove', onMouseMove);
+                                          document.removeEventListener('mouseup', onMouseUp);
+                                        };
+                                        
+                                        document.addEventListener('mousemove', onMouseMove);
+                                        document.addEventListener('mouseup', onMouseUp);
+                                      };
+                                      
+                                      const bgColor = edited ? '#f97316' : (s.status === 'approved' ? '#16a34a' : s.status === 'rejected' ? '#dc2626' : '#2563eb');
+                                      
+                                      const handleBarClick = (e: React.MouseEvent) => {
+                                        // ドラッグハンドルをクリックした場合は無視
+                                        if ((e.target as HTMLElement).classList.contains('cursor-ew-resize')) return;
+                                        setEditingShiftId(s.id);
+                                        setEditModalTime({ startTime: displayStart, endTime: displayEnd });
+                                      };
+                                      
                                       return (
-                                        <div key={s.id + '-' + idx} className="absolute top-1/4 h-1/2 rounded text-[12px] text-white flex items-center px-2" style={{ left: `${leftPct}%`, width: `${finalWidthPct}%`, backgroundColor: s.status === 'approved' ? '#16a34a' : s.status === 'rejected' ? '#dc2626' : '#2563eb', zIndex: 20, boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>
-                                          <div className="truncate">{s.startTime} - {s.endTime}</div>
+                                        <div 
+                                          key={s.id + '-' + idx} 
+                                          className="absolute top-1/4 h-1/2 rounded text-[12px] text-white flex items-center px-2 group cursor-pointer" 
+                                          style={{ left: `${leftPct}%`, width: `${finalWidthPct}%`, backgroundColor: bgColor, zIndex: 20, boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}
+                                          onClick={handleBarClick}
+                                        >
+                                          <div
+                                            className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black hover:bg-opacity-20 rounded-l"
+                                            onMouseDown={(e) => handleDragStart(e, 'start')}
+                                          />
+                                          <div className="flex-1 text-center truncate pointer-events-none">{displayStart} - {displayEnd}</div>
+                                          <div
+                                            className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black hover:bg-opacity-20 rounded-r"
+                                            onMouseDown={(e) => handleDragStart(e, 'end')}
+                                          />
                                         </div>
                                       );
                                     })}
@@ -634,6 +798,56 @@ export default function AdminShiftListPage() {
           </div>
         )}
       </div>
+
+      {/* 時間編集モーダル */}
+      {editingShiftId && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setEditingShiftId(null)}>
+          <div className="bg-white rounded-lg p-6 w-96" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold mb-4">シフト時間の編集</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">開始時刻</label>
+                <input
+                  type="time"
+                  value={editModalTime.startTime}
+                  onChange={(e) => setEditModalTime(prev => ({ ...prev, startTime: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">終了時刻</label>
+                <input
+                  type="time"
+                  value={editModalTime.endTime}
+                  onChange={(e) => setEditModalTime(prev => ({ ...prev, endTime: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setEditingShiftId(null)}
+                className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={() => {
+                  if (editModalTime.startTime && editModalTime.endTime) {
+                    setEditedShifts(prev => new Map(prev).set(editingShiftId, editModalTime));
+                    setEditingShiftId(null);
+                  } else {
+                    alert('開始時刻と終了時刻を入力してください');
+                  }
+                }}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              >
+                適用
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

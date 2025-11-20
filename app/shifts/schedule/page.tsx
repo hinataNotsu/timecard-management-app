@@ -8,6 +8,7 @@ import { db } from '@/lib/firebase';
 import JapaneseHolidays from 'japanese-holidays';
 
 type ShiftRow = {
+  id: string;
   userId: string;
   userName: string;
   avatarSeed?: string;
@@ -31,6 +32,8 @@ export default function ApprovedSchedulePage() {
   const [onlyMine, setOnlyMine] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const [selectedDayForTimeline, setSelectedDayForTimeline] = useState<Date | null>(null);
+  const [editedShifts, setEditedShifts] = useState<Map<string, { startTime: string; endTime: string }>>(new Map());
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!userProfile) return;
@@ -90,6 +93,7 @@ export default function ApprovedSchedulePage() {
           if (!userId) continue;
           const { name: userName, seed: avatarSeed, bgColor: avatarBgColor } = await getUserInfo(userId);
           list.push({
+            id: d.id,
             userId,
             userName,
             avatarSeed,
@@ -158,6 +162,29 @@ export default function ApprovedSchedulePage() {
     }
     return map;
   }, [filteredRows]);
+
+  const saveChanges = async () => {
+    if (editedShifts.size === 0) return;
+    setSaving(true);
+    try {
+      const { updateDoc } = await import('firebase/firestore');
+      for (const [shiftId, times] of editedShifts.entries()) {
+        const shiftRef = doc(db, 'shifts', shiftId);
+        await updateDoc(shiftRef, {
+          startTime: times.startTime,
+          endTime: times.endTime,
+        });
+      }
+      setEditedShifts(new Map());
+      setReloadToken(prev => prev + 1);
+      alert('シフトを保存しました');
+    } catch (error) {
+      console.error('Save error:', error);
+      alert('保存に失敗しました');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const exportCsv = () => {
     const y = selectedMonth.getFullYear();
@@ -318,9 +345,20 @@ export default function ApprovedSchedulePage() {
             <div className="bg-white rounded-lg p-4 w-full max-w-4xl max-h-[90vh] overflow-auto">
               <div className="flex items-center justify-between mb-3">
                 <div className="font-semibold">{selectedDayForTimeline.getFullYear()}年{selectedDayForTimeline.getMonth()+1}月{selectedDayForTimeline.getDate()}日のシフト（時間軸）</div>
-                <button onClick={() => setSelectedDayForTimeline(null)} className="px-3 py-1 border rounded">閉じる</button>
+                <div className="flex items-center gap-2">
+                  {editedShifts.size > 0 && (
+                    <button
+                      onClick={saveChanges}
+                      disabled={saving}
+                      className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {saving ? '保存中...' : `変更を保存 (${editedShifts.size})`}
+                    </button>
+                  )}
+                  <button onClick={() => setSelectedDayForTimeline(null)} className="px-3 py-1 border rounded hover:bg-gray-50">閉じる</button>
+                </div>
               </div>
-              <div className="text-sm text-gray-600 mb-2">※ 承認済みのシフトのみ表示</div>
+              <div className="text-sm text-gray-600 mb-2">※ 承認済みのシフトのみ表示　バーの両端をドラッグして時間を調整できます（15分単位）</div>
               <div className="relative">
                 {/* unified vertical markers overlay spanning header and rows */}
                 <div className="absolute top-0 bottom-0 left-0 right-0 pointer-events-none">
@@ -353,22 +391,74 @@ export default function ApprovedSchedulePage() {
                     if (dayList.length === 0) return <div className="text-sm text-gray-500">この日の承認済みシフトはありません</div>;
                     return dayList.map((s, idx) => {
                       const toMin = (t: string) => { const [hh, mm] = t.split(':').map(Number); return hh*60+mm; };
-                      const startMin = toMin(s.startTime);
-                      const endMin = toMin(s.endTime);
+                      const minToTime = (min: number) => {
+                        const h = Math.floor(min / 60);
+                        const m = min % 60;
+                        return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+                      };
+                      const roundTo15 = (min: number) => Math.round(min / 15) * 15;
+                      
+                      const edited = editedShifts.get(s.id);
+                      const displayStart = edited?.startTime || s.startTime;
+                      const displayEnd = edited?.endTime || s.endTime;
+                      const startMin = toMin(displayStart);
+                      const endMin = toMin(displayEnd);
                       const leftPct = (startMin / (24*60)) * 100;
                       const widthPct = Math.max(1, ((endMin - startMin) / (24*60)) * 100);
+                      
+                      const handleDragStart = (e: React.MouseEvent, edge: 'start' | 'end') => {
+                        e.preventDefault();
+                        const container = e.currentTarget.parentElement?.parentElement;
+                        if (!container) return;
+                        const rect = container.getBoundingClientRect();
+                        const totalWidth = rect.width;
+                        
+                        const onMouseMove = (moveEvent: MouseEvent) => {
+                          const offsetX = moveEvent.clientX - rect.left;
+                          const pct = Math.max(0, Math.min(100, (offsetX / totalWidth) * 100));
+                          const minutes = roundTo15((pct / 100) * 24 * 60);
+                          
+                          if (edge === 'start') {
+                            if (minutes < endMin) {
+                              setEditedShifts(prev => new Map(prev).set(s.id, { startTime: minToTime(minutes), endTime: displayEnd }));
+                            }
+                          } else {
+                            if (minutes > startMin) {
+                              setEditedShifts(prev => new Map(prev).set(s.id, { startTime: displayStart, endTime: minToTime(minutes) }));
+                            }
+                          }
+                        };
+                        
+                        const onMouseUp = () => {
+                          document.removeEventListener('mousemove', onMouseMove);
+                          document.removeEventListener('mouseup', onMouseUp);
+                        };
+                        
+                        document.addEventListener('mousemove', onMouseMove);
+                        document.addEventListener('mouseup', onMouseUp);
+                      };
+                      
                       return (
-                        <div key={idx} className="flex items-center gap-4 py-1">
-                          <div className="w-24 text-sm flex items-center gap-2">
-                            <img src={`https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(s.avatarSeed || s.userName || s.userId)}${s.avatarBgColor ? `&backgroundColor=${encodeURIComponent(s.avatarBgColor)}` : '&backgroundType=gradientLinear'}&radius=50`} alt={s.userName} className="w-6 h-6 rounded-full" />
+                        <div key={idx} className="flex items-center gap-4 py-0.5">
+                          <div className="w-24 text-xs flex items-center gap-2">
+                            <img src={`https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(s.avatarSeed || s.userName || s.userId)}${s.avatarBgColor ? `&backgroundColor=${encodeURIComponent(s.avatarBgColor)}` : '&backgroundType=gradientLinear'}&radius=50`} alt={s.userName} className="w-5 h-5 rounded-full" />
                             <div className="truncate">{s.userName}</div>
                           </div>
                           <div className="flex-1 relative">
-                            <div className="relative h-10">
-                              {/** shift bar overlay */}
-                              <div className="absolute top-1 bottom-1 left-0 right-0 pointer-events-none">
-                                <div className="absolute h-full bg-green-500 text-white rounded-md flex items-center px-2 text-xs" style={{ left: `${leftPct}%`, width: `${widthPct}%` }}>
-                                  {s.startTime}-{s.endTime}
+                            <div className="relative h-7">
+                              <div className="absolute top-0.5 bottom-0.5 left-0 right-0">
+                                <div className={`absolute h-full ${edited ? 'bg-orange-500' : 'bg-green-500'} text-white rounded-md flex items-center px-2 text-xs group`} style={{ left: `${leftPct}%`, width: `${widthPct}%` }}>
+                                  <div
+                                    className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black hover:bg-opacity-20 rounded-l-md"
+                                    onMouseDown={(e) => handleDragStart(e, 'start')}
+                                  />
+                                  <div className="flex-1 text-center pointer-events-none">
+                                    {displayStart}-{displayEnd}
+                                  </div>
+                                  <div
+                                    className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black hover:bg-opacity-20 rounded-r-md"
+                                    onMouseDown={(e) => handleDragStart(e, 'end')}
+                                  />
                                 </div>
                               </div>
                             </div>
