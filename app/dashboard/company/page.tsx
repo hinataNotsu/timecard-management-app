@@ -181,6 +181,17 @@ export default function CompanyDashboard() {
             </button>
           </div>
 
+          {/* タイムカードカード (isWatchAdmin=trueの場合のみ表示) */}
+          {organization?.isWatchAdmin !== false && (
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">タイムカード</h2>
+              <p className="text-gray-600 mb-4">スタッフのタイムカード管理</p>
+              <button onClick={() => router.push('/organization/timecards/users')} className="w-full px-4 py-2 bg-teal-600 text-white rounded-md hover:bg-teal-700 transition">
+                管理する
+              </button>
+            </div>
+          )}
+
           {/* 設定カード */}
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">設定</h2>

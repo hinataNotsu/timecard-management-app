@@ -43,6 +43,8 @@ export interface Organization {
   // 交通費
   transportAllowanceEnabled?: boolean; // 交通費を支給するか
   transportAllowancePerShift?: number; // 1シフトあたり交通費（円）
+  // タイムカード表示設定
+  isWatchAdmin?: boolean; // 管理者ダッシュボードにタイムカードを表示するか（true: 管理者, false: アルバイト）デフォルトtrue
 }
 
 // シフト情報
