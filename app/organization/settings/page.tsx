@@ -48,6 +48,9 @@ export default function OrganizationSettingsPage() {
   const [settings, setSettings] = useState<Required<OrgPaySettings>>(defaultSettings);
   const [shiftSubmissionEnforced, setShiftSubmissionEnforced] = useState<boolean>(false);
   const [shiftSubmissionMinDaysBefore, setShiftSubmissionMinDaysBefore] = useState<number>(3);
+  const [isWatchAdmin, setIsWatchAdmin] = useState<boolean>(true);
+  const [showWatchAdminDialog, setShowWatchAdminDialog] = useState<boolean>(false);
+  const [pendingWatchAdminValue, setPendingWatchAdminValue] = useState<boolean>(true);
   const [loaded, setLoaded] = useState(false);
   const isManager = !!userProfile?.isManage;
 
@@ -86,6 +89,7 @@ export default function OrganizationSettingsPage() {
         });
         setShiftSubmissionEnforced((org as any).shiftSubmissionEnforced ?? false);
         setShiftSubmissionMinDaysBefore(Number((org as any).shiftSubmissionMinDaysBefore ?? 3));
+        setIsWatchAdmin(org.isWatchAdmin ?? true);
       }
       setLoaded(true);
     };
@@ -165,6 +169,7 @@ export default function OrganizationSettingsPage() {
           transportAllowancePerShift: settings.transportAllowancePerShift,
           shiftSubmissionEnforced: shiftSubmissionEnforced,
           shiftSubmissionMinDaysBefore: shiftSubmissionMinDaysBefore,
+          isWatchAdmin: isWatchAdmin,
           updatedAt: Timestamp.now(),
         },
         { merge: true }
@@ -431,6 +436,35 @@ export default function OrganizationSettingsPage() {
             </div>
           </div>
 
+          {/* タイムカード表示設定 */}
+          <hr className="my-2" />
+          <h3 className="text-md font-semibold text-gray-900">タイムカード表示設定</h3>
+          <div className="grid grid-cols-1 gap-6">
+            <div className="flex items-center justify-between bg-gray-50 p-4 rounded-lg">
+              <div>
+                <label htmlFor="watchAdmin" className="text-sm font-medium text-gray-900">管理者ダッシュボードにタイムカードを表示</label>
+                <p className="text-xs text-gray-600 mt-1">有効にすると管理者がスタッフのタイムカードを編集できます。無効にするとアルバイトが個別に記録します。</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingWatchAdminValue(!isWatchAdmin);
+                  setShowWatchAdminDialog(true);
+                }}
+                disabled={!canEdit}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                  isWatchAdmin ? 'bg-blue-600' : 'bg-gray-200'
+                } ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    isWatchAdmin ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
           <div className="flex justify-end">
             <button
               onClick={save}
@@ -440,6 +474,40 @@ export default function OrganizationSettingsPage() {
           </div>
         </div>
       </main>
+
+      {/* タイムカード表示設定変更ダイアログ */}
+      {showWatchAdminDialog && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/50 z-50">
+          <div className="bg-white rounded-lg shadow-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-bold mb-4">タイムカード表示設定の変更</h3>
+            <p className="text-sm text-gray-700 mb-6">
+              {pendingWatchAdminValue
+                ? '管理者ダッシュボードにタイムカードを表示します。管理者がスタッフのタイムカードを作成・編集できるようになります。'
+                : 'アルバイトダッシュボードにタイムカードを表示します。各アルバイトが個別に出退勤を記録します。'}
+            </p>
+            <p className="text-sm text-yellow-700 bg-yellow-50 p-3 rounded mb-6">
+              ⚠️ この設定を変更すると、タイムカードの記録方法が変わります。よろしいですか？
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowWatchAdminDialog(false)}
+                className="px-4 py-2 rounded bg-gray-200 text-gray-700 hover:bg-gray-300"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={() => {
+                  setIsWatchAdmin(pendingWatchAdminValue);
+                  setShowWatchAdminDialog(false);
+                }}
+                className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+              >
+                変更する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

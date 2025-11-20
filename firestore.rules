@@ -179,33 +179,41 @@ service cloud.firestore {
       allow read: if signedIn() && isNotDeleted() && isMember(resource.data.organizationId);
       
       // アルバイトは自分のタイムカードを作成可能（status=draftのみ）& 削除済みでない
+      // 管理者は組織内の任意のユーザーのタイムカードを作成可能
       allow create: if signedIn() && 
                        isNotDeleted() &&
-                       request.auth.uid == request.resource.data.userId &&
                        isMember(request.resource.data.organizationId) &&
-                       request.resource.data.status == 'draft';
+                       (
+                         (request.auth.uid == request.resource.data.userId && request.resource.data.status == 'draft') ||
+                         isManage()
+                       );
       
       // アルバイトは自分のタイムカードを以下の条件で更新可能 & 削除済みでない
       // - status=draftの間は自由に更新可能（statusをdraftからpendingに変更することも含む）
       // - rejectedからdraftへの巻き戻しも可能
       // - 打刻フィールド（clockInAt, clockOutAt, breakStartAt, breakEndAt, updatedAt）のみの更新は、statusに関係なく可能
+      // 管理者は組織内の任意のタイムカードを更新可能
       allow update: if signedIn() && 
                        isNotDeleted() &&
-                       request.auth.uid == resource.data.userId &&
                        isMember(resource.data.organizationId) &&
                        (
-                         (resource.data.status == 'draft') ||
-                         (resource.data.status == 'rejected' && request.resource.data.status == 'draft') ||
+                         isManage() ||
                          (
-                           // 打刻フィールドのみの変更を許可（statusは変更しない）
-                           request.resource.data.status == resource.data.status &&
-                           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['clockInAt', 'clockOutAt', 'breakStartAt', 'breakEndAt', 'updatedAt'])
+                           request.auth.uid == resource.data.userId &&
+                           (
+                             (resource.data.status == 'draft') ||
+                             (resource.data.status == 'rejected' && request.resource.data.status == 'draft') ||
+                             (
+                               // 打刻フィールドのみの変更を許可（statusは変更しない）
+                               request.resource.data.status == resource.data.status &&
+                               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['clockInAt', 'clockOutAt', 'breakStartAt', 'breakEndAt', 'updatedAt'])
+                             )
+                           )
                          )
                        );
       
-      // 管理者は同じ組織のタイムカードを更新・削除可能（承認/却下を含む）& 削除済みでない
-      allow update, delete: if signedIn() && isNotDeleted() && isMember(resource.data.organizationId) && isManage();
-      allow update, delete: if signedIn() && isMember(resource.data.organizationId) && isManage();
+      // 管理者は同じ組織のタイムカードを削除可能 & 削除済みでない
+      allow delete: if signedIn() && isNotDeleted() && isMember(resource.data.organizationId) && isManage();
     }
   }
 }
