@@ -40,6 +40,9 @@ export default function ShiftSubmitPage() {
   const [orgDefaultHourlyWage, setOrgDefaultHourlyWage] = useState<number>(1100);
   const [shiftSubmissionEnforced, setShiftSubmissionEnforced] = useState<boolean>(false);
   const [shiftSubmissionMinDaysBefore, setShiftSubmissionMinDaysBefore] = useState<number>(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStartInfo, setDragStartInfo] = useState<{ date: string; startY: number; startMin: number } | null>(null);
+  const [tempShift, setTempShift] = useState<{ date: string; startTime: string; endTime: string } | null>(null);
 
 
 
@@ -105,6 +108,106 @@ export default function ShiftSubmitPage() {
     };
     loadOrgSettings();
   }, [userProfile, router]);
+
+  // ドラッグで作成したシフトを直接保存
+  const saveShiftDirect = async (shift: { date: string; startTime: string; endTime: string }) => {
+    if (!userProfile?.uid || !userProfile?.currentOrganizationId) {
+      alert('ユーザーまたは所属組織が特定できません');
+      return;
+    }
+
+    const orgId = userProfile.currentOrganizationId;
+    const belongs = Array.isArray(userProfile.organizationIds) && userProfile.organizationIds.includes(orgId);
+    if (!belongs) {
+      alert('選択中の企業に未所属のためシフトを登録できません。企業IDの参加を完了してください。');
+      router.push('/join-organization');
+      return;
+    }
+
+    // 締切チェック
+    if (!canSubmitForDate(new Date(shift.date))) {
+      alert('この日のシフトは締切を過ぎているため追加できません');
+      return;
+    }
+
+    // 既存のシフトと重複チェック
+    const dateShifts = getShiftsForDate(shift.date);
+    const hasOverlap = dateShifts.some(s => {
+      return !(shift.endTime <= s.startTime || shift.startTime >= s.endTime);
+    });
+
+    if (hasOverlap) {
+      alert('この時間帯は既にシフトが入っています');
+      return;
+    }
+
+    try {
+      const usersRef = doc(db, 'users', userProfile.uid);
+      const [y, m, d] = shift.date.split('-').map((v) => parseInt(v, 10));
+      const dateTs = Timestamp.fromDate(new Date(y, m - 1, d, 0, 0, 0));
+
+      const docRef = await addDoc(collection(db, 'shifts'), {
+        organizationId: userProfile.currentOrganizationId,
+        userRef: usersRef,
+        createdTime: serverTimestamp(),
+        date: dateTs,
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+        originalStartTime: shift.startTime,
+        originalEndTime: shift.endTime,
+        note: '',
+        hourlyWage: orgDefaultHourlyWage,
+        status: 'pending',
+        approvedBy: null,
+        approvedAt: null,
+        rejectReason: null,
+      });
+
+      // ローカル状態に反映
+      setShifts([...shifts, { ...shift, id: docRef.id, persisted: true, status: 'pending', note: '' }]);
+    } catch (e) {
+      console.error('[Shift Submit] ドラッグでのシフト作成失敗:', e);
+      alert('シフトの追加に失敗しました');
+    }
+  };
+
+  // ドラッグ中のマウス移動とドラッグ終了処理
+  useEffect(() => {
+    if (!isDragging) return;
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragStartInfo) return;
+      
+      const deltaY = e.clientY - dragStartInfo.startY;
+      // 週表示: 48px/時間、日表示: 64px/時間
+      const pixelPerHour = viewMode === 'week' ? 48 : 64;
+      const deltaMin = Math.round((deltaY / pixelPerHour) * 60 / 15) * 15; // 15分単位
+      const endMin = Math.max(dragStartInfo.startMin + 15, dragStartInfo.startMin + deltaMin);
+      
+      setTempShift({
+        date: dragStartInfo.date,
+        startTime: minToTime(dragStartInfo.startMin),
+        endTime: minToTime(Math.min(endMin, 24 * 60))
+      });
+    };
+    
+    const handleMouseUp = async () => {
+      if (tempShift) {
+        // ドラッグ終了：直接シフトを作成
+        await saveShiftDirect(tempShift);
+      }
+      setIsDragging(false);
+      setDragStartInfo(null);
+      setTempShift(null);
+    };
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, dragStartInfo, tempShift, viewMode]);
 
   // 表示月のシフトを読み込む関数
   const loadMonthShifts = async (baseDate: Date) => {
@@ -210,6 +313,13 @@ export default function ShiftSubmitPage() {
       if (st === 'rejected') return 'bg-red-500 text-white';
       return 'bg-gray-500 text-white'; // pending
     }
+  };
+
+  // 分を時刻文字列に変換
+  const minToTime = (min: number): string => {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   };
 
   // 日付文字列をフォーマット
@@ -586,25 +696,32 @@ export default function ShiftSubmitPage() {
                   }`}>{day.getDate()}</div>
                 </div>
                 <div className="relative">
-                  {/** vertical markers at 6/12/18/24 for day column */}
-                  {[6,12,18,24].map((h) => (
-                    <div key={`marker-${h}`} className="absolute top-0 bottom-0" style={{ left: `${(h/24)*100}%`, width: '1px', background: 'rgba(156,163,175,0.9)' }} />
-                  ))}
                   {hours.map((hour, hourIndex) => (
                     <div
                       key={hour}
                       className={`h-12 border-b border-gray-300 border-opacity-50 ${isLockedDay ? 'cursor-not-allowed' : 'hover:bg-gray-50 cursor-pointer'}`}
                       title={isLockedDay ? 'この日のシフトは締切を過ぎています（前月25日12時）' : ''}
+                      onMouseDown={(e) => {
+                        if (isLockedDay) return;
+                        const rect = e.currentTarget.parentElement!.getBoundingClientRect();
+                        const offsetY = e.clientY - rect.top;
+                        const minutes = Math.round((offsetY / (48 * 24)) * 24 * 60 / 15) * 15; // 15分単位
+                        setIsDragging(true);
+                        setDragStartInfo({ date: dateStr, startY: e.clientY, startMin: minutes });
+                        setTempShift({ date: dateStr, startTime: minToTime(minutes), endTime: minToTime(minutes + 60) });
+                      }}
                       onClick={() => {
-                        setSelectedDate(dateStr);
-                        setNewShift({
-                          date: dateStr,
-                          startTime: hour,
-                          endTime: `${(hourIndex + 1).toString().padStart(2, '0')}:00`,
-                          note: '',
-                        });
-                        if (!isLockedDay) {
-                          setIsAddingShift(true);
+                        if (!isDragging) {
+                          setSelectedDate(dateStr);
+                          setNewShift({
+                            date: dateStr,
+                            startTime: hour,
+                            endTime: `${(hourIndex + 1).toString().padStart(2, '0')}:00`,
+                            note: '',
+                          });
+                          if (!isLockedDay) {
+                            setIsAddingShift(true);
+                          }
                         }
                       }}
                     ></div>
@@ -640,6 +757,18 @@ export default function ShiftSubmitPage() {
                               </div>
                             );
                   })}
+                  {/* ドラッグ中の一時的なシフト表示 */}
+                  {tempShift && tempShift.date === dateStr && (
+                    <div
+                      className="absolute left-1 right-1 bg-blue-300 bg-opacity-50 text-xs p-1 rounded-md overflow-hidden pointer-events-none border-2 border-blue-500 border-dashed"
+                      style={{
+                        top: `${(parseInt(tempShift.startTime.split(':')[0]) + parseInt(tempShift.startTime.split(':')[1]) / 60) * 48}px`,
+                        height: `${((parseInt(tempShift.endTime.split(':')[0]) + parseInt(tempShift.endTime.split(':')[1]) / 60) - (parseInt(tempShift.startTime.split(':')[0]) + parseInt(tempShift.startTime.split(':')[1]) / 60)) * 48}px`
+                      }}
+                    >
+                      <div className="font-semibold">{tempShift.startTime}-{tempShift.endTime}</div>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -673,10 +802,6 @@ export default function ShiftSubmitPage() {
             ))}
           </div>
           <div className="relative border-r border-gray-300 border-opacity-50">
-            {/** vertical markers at 6/12/18/24 for day view timeline */}
-            {[6,12,18,24].map((h) => (
-              <div key={`dmarker-${h}`} className="absolute top-0 bottom-0" style={{ left: `${(h/24)*100}%`, width: '1px', background: 'rgba(156,163,175,0.9)' }} />
-            ))}
             <div className={`h-12 border-b border-gray-300 border-opacity-50 p-2 text-center font-semibold ${
               holiday || dayOfWeek === 0 ? 'text-red-600' : dayOfWeek === 6 ? 'text-blue-600' : ''
             }`}>
@@ -689,16 +814,27 @@ export default function ShiftSubmitPage() {
                   key={hour}
                   className={`h-16 border-b border-gray-300 border-opacity-50 ${isLockedDay ? 'cursor-not-allowed' : 'hover:bg-gray-50 cursor-pointer'}`}
                   title={isLockedDay ? 'この日のシフトは締切を過ぎています（前月25日12時）' : ''}
+                  onMouseDown={(e) => {
+                    if (isLockedDay) return;
+                    const rect = e.currentTarget.parentElement!.getBoundingClientRect();
+                    const offsetY = e.clientY - rect.top - 48; // ヘッダー分を引く
+                    const minutes = Math.round((offsetY / (64 * 24)) * 24 * 60 / 15) * 15; // 64px = 1時間、15分単位
+                    setIsDragging(true);
+                    setDragStartInfo({ date: dateStr, startY: e.clientY, startMin: minutes });
+                    setTempShift({ date: dateStr, startTime: minToTime(minutes), endTime: minToTime(minutes + 60) });
+                  }}
                   onClick={() => {
-                    setSelectedDate(dateStr);
-                    setNewShift({
-                      date: dateStr,
-                      startTime: hour,
-                      endTime: `${(hourIndex + 1).toString().padStart(2, '0')}:00`,
-                      note: '',
-                    });
-                    if (!isLockedDay) {
-                      setIsAddingShift(true);
+                    if (!isDragging) {
+                      setSelectedDate(dateStr);
+                      setNewShift({
+                        date: dateStr,
+                        startTime: hour,
+                        endTime: `${(hourIndex + 1).toString().padStart(2, '0')}:00`,
+                        note: '',
+                      });
+                      if (!isLockedDay) {
+                        setIsAddingShift(true);
+                      }
                     }
                   }}
                 ></div>
@@ -735,6 +871,18 @@ export default function ShiftSubmitPage() {
                   </div>
                 );
               })}
+              {/* ドラッグ中の一時的なシフト表示 */}
+              {tempShift && tempShift.date === dateStr && (
+                <div
+                  className="absolute left-2 right-2 bg-blue-300 bg-opacity-50 p-2 rounded overflow-hidden pointer-events-none border-2 border-blue-500 border-dashed"
+                  style={{
+                    top: `${(parseInt(tempShift.startTime.split(':')[0]) + parseInt(tempShift.startTime.split(':')[1]) / 60) * 64 + 48}px`,
+                    height: `${((parseInt(tempShift.endTime.split(':')[0]) + parseInt(tempShift.endTime.split(':')[1]) / 60) - (parseInt(tempShift.startTime.split(':')[0]) + parseInt(tempShift.startTime.split(':')[1]) / 60)) * 64}px`
+                  }}
+                >
+                  <div className="font-semibold">{tempShift.startTime}-{tempShift.endTime}</div>
+                </div>
+              )}
             </div>
           </div>
         </div>
