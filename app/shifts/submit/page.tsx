@@ -41,8 +41,11 @@ export default function ShiftSubmitPage() {
   const [shiftSubmissionEnforced, setShiftSubmissionEnforced] = useState<boolean>(false);
   const [shiftSubmissionMinDaysBefore, setShiftSubmissionMinDaysBefore] = useState<number>(0);
   const [isDragging, setIsDragging] = useState(false);
-  const [dragStartInfo, setDragStartInfo] = useState<{ date: string; startY: number; startMin: number } | null>(null);
+  const [dragStartInfo, setDragStartInfo] = useState<{ date: string; startY: number; startMin: number } | null>(null); // startYはpageY（スクロール含む絶対座標）
   const [tempShift, setTempShift] = useState<{ date: string; startTime: string; endTime: string } | null>(null);
+  const [longPressTimer, setLongPressTimer] = useState<NodeJS.Timeout | null>(null);
+  const [isLongPressActive, setIsLongPressActive] = useState(false);
+  const [resizingShift, setResizingShift] = useState<{ id: string; edge: 'start' | 'end'; originalStart: string; originalEnd: string; startY: number } | null>(null);
 
 
 
@@ -178,7 +181,8 @@ export default function ShiftSubmitPage() {
     const handleMouseMove = (e: MouseEvent) => {
       if (!dragStartInfo) return;
       
-      const deltaY = e.clientY - dragStartInfo.startY;
+      // pageYを使用してスクロールを考慮した絶対座標で計算
+      const deltaY = e.pageY - dragStartInfo.startY;
       // 週表示: 48px/時間、日表示: 64px/時間
       const pixelPerHour = viewMode === 'week' ? 48 : 64;
       const deltaMin = Math.round((deltaY / pixelPerHour) * 60 / 15) * 15; // 15分単位
@@ -208,6 +212,69 @@ export default function ShiftSubmitPage() {
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isDragging, dragStartInfo, tempShift, viewMode]);
+
+  // リサイズ処理
+  useEffect(() => {
+    if (!resizingShift) return;
+
+    const timeToMin = (time: string): number => {
+      const [h, m] = time.split(':').map(v => parseInt(v, 10));
+      return h * 60 + m;
+    };
+
+    const minToTime = (min: number): string => {
+      const h = Math.floor(min / 60);
+      const m = min % 60;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    };
+
+    const handleMouseMove = async (e: MouseEvent) => {
+      if (!resizingShift) return;
+
+      const deltaY = e.pageY - resizingShift.startY;
+      const pixelPerHour = viewMode === 'week' ? 48 : 64;
+      const deltaMin = Math.round((deltaY / pixelPerHour) * 60 / 15) * 15;
+
+      const startMin = timeToMin(resizingShift.originalStart);
+      const endMin = timeToMin(resizingShift.originalEnd);
+
+      let newStartMin = startMin;
+      let newEndMin = endMin;
+
+      if (resizingShift.edge === 'start') {
+        newStartMin = Math.max(0, Math.min(startMin + deltaMin, endMin - 15));
+      } else {
+        newEndMin = Math.min(24 * 60, Math.max(endMin + deltaMin, startMin + 15));
+      }
+
+      // リアルタイムでFirestoreを更新
+      try {
+        await updateDoc(doc(db, 'shifts', resizingShift.id), {
+          startTime: minToTime(newStartMin),
+          endTime: minToTime(newEndMin),
+        });
+        // 表示を更新
+        if (viewMode === 'month') {
+          await loadMonthShifts(targetMonth);
+        } else {
+          await loadMonthShifts(currentDate);
+        }
+      } catch (e) {
+        console.error('リサイズ中の更新失敗:', e);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setResizingShift(null);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizingShift, viewMode, targetMonth, currentDate]);
 
   // 表示月のシフトを読み込む関数
   const loadMonthShifts = async (baseDate: Date) => {
@@ -707,8 +774,52 @@ export default function ShiftSubmitPage() {
                         const offsetY = e.clientY - rect.top;
                         const minutes = Math.round((offsetY / (48 * 24)) * 24 * 60 / 15) * 15; // 15分単位
                         setIsDragging(true);
-                        setDragStartInfo({ date: dateStr, startY: e.clientY, startMin: minutes });
+                        setDragStartInfo({ date: dateStr, startY: e.pageY, startMin: minutes }); // pageYを使用
                         setTempShift({ date: dateStr, startTime: minToTime(minutes), endTime: minToTime(minutes + 60) });
+                      }}
+                      onTouchStart={(e) => {
+                        if (isLockedDay) return;
+                        const touch = e.touches[0];
+                        const rect = e.currentTarget.parentElement!.getBoundingClientRect();
+                        const offsetY = touch.clientY - rect.top;
+                        const minutes = Math.round((offsetY / (48 * 24)) * 24 * 60 / 15) * 15;
+                        
+                        const timer = setTimeout(() => {
+                          setIsLongPressActive(true);
+                          setIsDragging(true);
+                          setDragStartInfo({ date: dateStr, startY: touch.clientY, startMin: minutes });
+                          setTempShift({ date: dateStr, startTime: minToTime(minutes), endTime: minToTime(minutes + 60) });
+                        }, 500);
+                        setLongPressTimer(timer);
+                      }}
+                      onTouchMove={(e) => {
+                        if (longPressTimer) {
+                          clearTimeout(longPressTimer);
+                          setLongPressTimer(null);
+                        }
+                        if (!isLongPressActive || !isDragging || !dragStartInfo) return;
+                        const touch = e.touches[0];
+                        const deltaY = touch.clientY - dragStartInfo.startY;
+                        const deltaMin = Math.round((deltaY / 48) * 60 / 15) * 15;
+                        const endMin = Math.max(dragStartInfo.startMin + 15, dragStartInfo.startMin + deltaMin);
+                        setTempShift({
+                          date: dragStartInfo.date,
+                          startTime: minToTime(dragStartInfo.startMin),
+                          endTime: minToTime(Math.min(endMin, 24 * 60 - 15)),
+                        });
+                      }}
+                      onTouchEnd={() => {
+                        if (longPressTimer) {
+                          clearTimeout(longPressTimer);
+                          setLongPressTimer(null);
+                        }
+                        if (isLongPressActive && tempShift) {
+                          saveShiftDirect(tempShift);
+                        }
+                        setIsLongPressActive(false);
+                        setIsDragging(false);
+                        setDragStartInfo(null);
+                        setTempShift(null);
                       }}
                       onClick={() => {
                         if (!isDragging) {
@@ -737,9 +848,11 @@ export default function ShiftSubmitPage() {
                             return (
                               <div
                                 key={shift.id}
-                                className={`absolute left-1 right-1 ${classesForStatus(shift.status, 'block')} text-xs p-1 rounded-md overflow-hidden ${!canSubmitForDate(new Date(shift.date)) ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
+                                className={`absolute left-1 right-1 ${classesForStatus(shift.status, 'block')} text-xs p-1 rounded-md overflow-visible ${!canSubmitForDate(new Date(shift.date)) ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'} group`}
                                 style={{ top: `${top}px`, height: `${height}px` }}
                                 onClick={(e) => {
+                                  const target = e.target as HTMLElement;
+                                  if (target.classList.contains('resize-handle')) return;
                                   e.stopPropagation();
                                   if (!canSubmitForDate(new Date(shift.date))) return;
                                   setEditingId(shift.id!);
@@ -752,8 +865,26 @@ export default function ShiftSubmitPage() {
                                   setIsAddingShift(true);
                                 }}
                               >
-                                <div className="font-semibold">{shift.startTime}-{shift.endTime}</div>
-                                {shift.note && <div className="truncate">{shift.note}</div>}
+                                {canSubmitForDate(new Date(shift.date)) && (
+                                  <>
+                                    <div
+                                      className="resize-handle absolute top-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black hover:bg-opacity-20 opacity-0 group-hover:opacity-100 transition-opacity"
+                                      onMouseDown={(e) => {
+                                        e.stopPropagation();
+                                        setResizingShift({ id: shift.id!, edge: 'start', originalStart: shift.startTime, originalEnd: shift.endTime, startY: e.pageY });
+                                      }}
+                                    />
+                                    <div
+                                      className="resize-handle absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black hover:bg-opacity-20 opacity-0 group-hover:opacity-100 transition-opacity"
+                                      onMouseDown={(e) => {
+                                        e.stopPropagation();
+                                        setResizingShift({ id: shift.id!, edge: 'end', originalStart: shift.startTime, originalEnd: shift.endTime, startY: e.pageY });
+                                      }}
+                                    />
+                                  </>
+                                )}
+                                <div className="font-semibold pointer-events-none">{shift.startTime}-{shift.endTime}</div>
+                                {shift.note && <div className="truncate pointer-events-none">{shift.note}</div>}
                               </div>
                             );
                   })}
@@ -817,11 +948,55 @@ export default function ShiftSubmitPage() {
                   onMouseDown={(e) => {
                     if (isLockedDay) return;
                     const rect = e.currentTarget.parentElement!.getBoundingClientRect();
-                    const offsetY = e.clientY - rect.top - 48; // ヘッダー分を引く
-                    const minutes = Math.round((offsetY / (64 * 24)) * 24 * 60 / 15) * 15; // 64px = 1時間、15分単位
+                    const offsetY = e.clientY - rect.top; // ヘッダー分は含まない（parentElement!はdivコンテナ）
+                    const minutes = Math.round((offsetY / 64) * 60 / 15) * 15; // 64px = 1時間、15分単位
                     setIsDragging(true);
-                    setDragStartInfo({ date: dateStr, startY: e.clientY, startMin: minutes });
+                    setDragStartInfo({ date: dateStr, startY: e.pageY, startMin: minutes }); // pageYを使用
                     setTempShift({ date: dateStr, startTime: minToTime(minutes), endTime: minToTime(minutes + 60) });
+                  }}
+                  onTouchStart={(e) => {
+                    if (isLockedDay) return;
+                    const touch = e.touches[0];
+                    const rect = e.currentTarget.parentElement!.getBoundingClientRect();
+                    const offsetY = touch.clientY - rect.top;
+                    const minutes = Math.round((offsetY / 64) * 60 / 15) * 15;
+                    
+                    const timer = setTimeout(() => {
+                      setIsLongPressActive(true);
+                      setIsDragging(true);
+                      setDragStartInfo({ date: dateStr, startY: touch.clientY, startMin: minutes });
+                      setTempShift({ date: dateStr, startTime: minToTime(minutes), endTime: minToTime(minutes + 60) });
+                    }, 500);
+                    setLongPressTimer(timer);
+                  }}
+                  onTouchMove={(e) => {
+                    if (longPressTimer) {
+                      clearTimeout(longPressTimer);
+                      setLongPressTimer(null);
+                    }
+                    if (!isLongPressActive || !isDragging || !dragStartInfo) return;
+                    const touch = e.touches[0];
+                    const deltaY = touch.clientY - dragStartInfo.startY;
+                    const deltaMin = Math.round((deltaY / 64) * 60 / 15) * 15;
+                    const endMin = Math.max(dragStartInfo.startMin + 15, dragStartInfo.startMin + deltaMin);
+                    setTempShift({
+                      date: dragStartInfo.date,
+                      startTime: minToTime(dragStartInfo.startMin),
+                      endTime: minToTime(Math.min(endMin, 24 * 60 - 15)),
+                    });
+                  }}
+                  onTouchEnd={() => {
+                    if (longPressTimer) {
+                      clearTimeout(longPressTimer);
+                      setLongPressTimer(null);
+                    }
+                    if (isLongPressActive && tempShift) {
+                      saveShiftDirect(tempShift);
+                    }
+                    setIsLongPressActive(false);
+                    setIsDragging(false);
+                    setDragStartInfo(null);
+                    setTempShift(null);
                   }}
                   onClick={() => {
                     if (!isDragging) {
@@ -850,10 +1025,12 @@ export default function ShiftSubmitPage() {
                 return (
                   <div
                     key={shift.id}
-                    className={`absolute left-2 right-2 ${classesForStatus(shift.status, 'block')} p-2 rounded overflow-hidden ${!canSubmitForDate(new Date(shift.date)) ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
+                    className={`absolute left-2 right-2 ${classesForStatus(shift.status, 'block')} p-2 rounded overflow-visible ${!canSubmitForDate(new Date(shift.date)) ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'} group`}
                     title={!canSubmitForDate(new Date(shift.date)) ? 'このシフトは締切後のため編集できません' : ''}
                     style={{ top: `${top + 48}px`, height: `${height}px` }}
                     onClick={(e) => {
+                      const target = e.target as HTMLElement;
+                      if (target.classList.contains('resize-handle')) return;
                       e.stopPropagation();
                       if (!canSubmitForDate(new Date(shift.date))) return;
                       setEditingId(shift.id!);
@@ -866,8 +1043,26 @@ export default function ShiftSubmitPage() {
                       setIsAddingShift(true);
                     }}
                   >
-                    <div className="font-semibold">{shift.startTime}-{shift.endTime}</div>
-                    {shift.note && <div className="mt-1">{shift.note}</div>}
+                    {canSubmitForDate(new Date(shift.date)) && (
+                      <>
+                        <div
+                          className="resize-handle absolute top-0 left-0 right-0 h-3 cursor-ns-resize hover:bg-black hover:bg-opacity-20 opacity-0 group-hover:opacity-100 transition-opacity"
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            setResizingShift({ id: shift.id!, edge: 'start', originalStart: shift.startTime, originalEnd: shift.endTime, startY: e.pageY });
+                          }}
+                        />
+                        <div
+                          className="resize-handle absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize hover:bg-black hover:bg-opacity-20 opacity-0 group-hover:opacity-100 transition-opacity"
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            setResizingShift({ id: shift.id!, edge: 'end', originalStart: shift.startTime, originalEnd: shift.endTime, startY: e.pageY });
+                          }}
+                        />
+                      </>
+                    )}
+                    <div className="font-semibold pointer-events-none">{shift.startTime}-{shift.endTime}</div>
+                    {shift.note && <div className="mt-1 pointer-events-none">{shift.note}</div>}
                   </div>
                 );
               })}
