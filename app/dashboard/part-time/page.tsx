@@ -192,82 +192,91 @@ export default function PartTimeDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 pb-safe">
       {/* ヘッダー */}
-      <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-bold text-gray-900">アルバイトダッシュボード</h1>
-            <OrganizationSelector />
+      <header className="bg-white shadow sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-3 sm:py-4">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+            {/* タイトルと組織セレクター */}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900">アルバイトダッシュボード</h1>
+              <div className="w-full sm:w-auto">
+                <OrganizationSelector />
+              </div>
+            </div>
+            {/* ログアウトボタン */}
+            <button
+              onClick={handleSignOut}
+              className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition text-sm sm:text-base whitespace-nowrap self-end sm:self-auto"
+            >
+              ログアウト
+            </button>
           </div>
-          <button
-            onClick={handleSignOut}
-            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition"
-          >
-            ログアウト
-          </button>
         </div>
       </header>
 
       {/* メインコンテンツ */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <main className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {/* シフト提出カード */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">シフト提出</h2>
-            <p className="text-gray-600 mb-4">今月のシフトを提出しましょう</p>
+          <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+            <h2 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">シフト提出</h2>
+            <p className="text-sm sm:text-base text-gray-600 mb-3 sm:mb-4">今月のシフトを提出しましょう</p>
             <button
               onClick={() => router.push('/shifts/submit')}
-              className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+              className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 active:bg-blue-800 transition text-sm sm:text-base"
             >
               シフトを提出
             </button>
           </div>
 
           {/* シフト一覧カード（承認済みの月間カレンダー） */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">シフト一覧</h2>
-            <p className="text-gray-600 mb-4">承認済みのシフト（月間）を全員分で確認</p>
-            <button onClick={() => router.push('/shifts/schedule')} className="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition">
+          <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+            <h2 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">シフト一覧</h2>
+            <p className="text-sm sm:text-base text-gray-600 mb-3 sm:mb-4">承認済みのシフト（月間）を全員分で確認</p>
+            <button 
+              onClick={() => router.push('/shifts/schedule')} 
+              className="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 active:bg-green-800 transition text-sm sm:text-base"
+            >
               承認済みカレンダーを見る
             </button>
           </div>
 
           {/* 給与一覧カード */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">給与一覧</h2>
-            <p className="text-gray-600 mb-4">承認済みシフトから計算された給与を確認</p>
+          <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+            <h2 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">給与一覧</h2>
+            <p className="text-sm sm:text-base text-gray-600 mb-3 sm:mb-4">承認済みシフトから計算された給与を確認</p>
             <button
               onClick={() => router.push('/dashboard/part-time/payroll')}
-              className="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition"
+              className="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 active:bg-purple-800 transition text-sm sm:text-base"
             >
               今月の給与一覧へ
             </button>
           </div>
 
           {/* 見込み給与カード */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">今月の見込み給与</h2>
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <label className="flex items-center gap-2 text-sm text-gray-700">
-                <input type="checkbox" checked={includePending} onChange={(e) => setIncludePending(e.target.checked)} /> 申請中も含める
+          <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+            <h2 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">今月の見込み給与</h2>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mb-3">
+              <label className="flex items-center gap-2 text-xs sm:text-sm text-gray-700">
+                <input type="checkbox" checked={includePending} onChange={(e) => setIncludePending(e.target.checked)} className="w-4 h-4" /> 申請中も含める
               </label>
               {!orgSettings?.transportAllowanceEnabled && (
-                <span className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 px-2 py-0.5 rounded">交通費は無効です</span>
+                <span className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 px-2 py-0.5 rounded whitespace-nowrap">交通費は無効です</span>
               )}
             </div>
-            <p className="text-3xl font-bold text-gray-900 mb-2">¥{estimate.total.toLocaleString('ja-JP')}</p>
-            <p className="text-sm text-gray-600">対象シフト: {(estimate.minutes / 60).toFixed(1)}時間</p>
+            <p className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">¥{estimate.total.toLocaleString('ja-JP')}</p>
+            <p className="text-xs sm:text-sm text-gray-600">対象シフト: {(estimate.minutes / 60).toFixed(1)}時間</p>
           </div>
 
           {/* タイムカードカード - isWatchAdminがfalseの時のみ表示 */}
           {orgSettings && !orgSettings.isWatchAdmin && (
-            <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">タイムカード</h2>
-              <p className="text-gray-600 mb-4">出退勤の打刻</p>
+            <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+              <h2 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">タイムカード</h2>
+              <p className="text-sm sm:text-base text-gray-600 mb-3 sm:mb-4">出退勤の打刻</p>
               <button
                 onClick={() => router.push('/dashboard/part-time/timecard')}
-                className="w-full px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition"
+                className="w-full px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 active:bg-indigo-800 transition text-sm sm:text-base"
               >
                 タイムカードページへ
               </button>
@@ -275,13 +284,16 @@ export default function PartTimeDashboard() {
           )}
 
           {/* プロフィールカード */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">プロフィール</h2>
-            <p className="text-sm text-gray-600 mb-2">メール: {userProfile.email}</p>
-            <p className="text-sm text-gray-600 mb-4">
+          <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+            <h2 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">プロフィール</h2>
+            <p className="text-xs sm:text-sm text-gray-600 mb-2 break-all">メール: {userProfile.email}</p>
+            <p className="text-xs sm:text-sm text-gray-600 mb-3 sm:mb-4">
               所属組織数: {userProfile.organizationIds?.length || 0}
             </p>
-            <button onClick={() => router.push('/profile')} className="w-full px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition">
+            <button 
+              onClick={() => router.push('/profile')} 
+              className="w-full px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 active:bg-gray-800 transition text-sm sm:text-base"
+            >
               設定
             </button>
           </div>

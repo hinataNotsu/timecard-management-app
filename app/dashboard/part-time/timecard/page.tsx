@@ -199,83 +199,169 @@ export default function TimecardPage() {
 
   // derived durations
   const workedMinutes = useMemo(() => {
-    if (!record?.clockInAt || !record.clockOutAt) return 0;
-    const start = record.clockInAt.toDate();
-    const end = record.clockOutAt.toDate();
-    let diff = Math.max(0, (end.getTime() - start.getTime()) / 60000);
-    if (record.breakStartAt && record.breakEndAt) {
-      const bs = record.breakStartAt.toDate();
-      const be = record.breakEndAt.toDate();
-      const bd = Math.max(0, (be.getTime() - bs.getTime()) / 60000);
-      diff -= bd;
-    }
-    return Math.round(diff);
-  }, [record]);
+    if (!record?.clockInAt || !now) return 0;
+    const end = record.clockOutAt ? record.clockOutAt.toDate() : now;
+    return Math.floor((end.getTime() - record.clockInAt.toDate().getTime()) / 60000);
+  }, [record, now]);
 
   const breakMinutes = useMemo(() => {
-    if (!record?.breakStartAt || !record.breakEndAt) return 0;
-    const bs = record.breakStartAt.toDate();
-    const be = record.breakEndAt.toDate();
-    return Math.round(Math.max(0, (be.getTime() - bs.getTime()) / 60000));
-  }, [record]);
+    if (!record?.breakStartAt) return 0;
+    const end = record.breakEndAt ? record.breakEndAt.toDate() : (record.clockOutAt ? null : now);
+    if (!end) return 0;
+    return Math.floor((end.getTime() - record.breakStartAt.toDate().getTime()) / 60000);
+  }, [record, now]);
 
-  const fmt = (ts?: Timestamp) => ts ? ts.toDate().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '--:--:--';
+  const netMinutes = workedMinutes - breakMinutes;
+  const hours = Math.floor(netMinutes / 60);
+  const minutes = netMinutes % 60;
 
-  // button states
-  const canClockIn = !record?.clockInAt;
-  const canBreakStart = !!record?.clockInAt && !record.breakStartAt && !record.clockOutAt;
-  const canBreakEnd = !!record?.breakStartAt && !record.breakEndAt && !record.clockOutAt;
-  const canClockOut = !!record?.clockInAt && !record.clockOutAt && (!record.breakStartAt || !!record.breakEndAt);
-  const canStartNew = !!record?.clockOutAt; // 退勤済みなら新しいタイムカードを開始できる
+  const clockIn = () => updateField('clockInAt');
+  const breakStart = () => updateField('breakStartAt');
+  const breakEnd = () => updateField('breakEndAt');
+  const clockOut = () => updateField('clockOutAt');
 
-  const startNewTimecard = () => {
-    setRecord(null); // レコードをクリアして新しいタイムカードを作成可能にする
-  };
+  const canClockIn = useMemo(() => !record?.clockInAt, [record]);
+  const canBreakStart = useMemo(() => record?.clockInAt && !record?.breakStartAt && !record?.clockOutAt, [record]);
+  const canBreakEnd = useMemo(() => record?.breakStartAt && !record?.breakEndAt && !record?.clockOutAt, [record]);
+  const canClockOut = useMemo(() => record?.clockInAt && !record?.clockOutAt && (!record?.breakStartAt || record?.breakEndAt), [record]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-gray-600">読み込み中...</div>
+      </div>
+    );
+  }
+
+  if (!userProfile) {
+    return null;
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-3xl mx-auto px-4 py-6">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl font-bold">タイムカード</h1>
-          <button onClick={() => router.push('/dashboard/part-time')} className="text-sm text-gray-600 hover:text-gray-900">← ダッシュボード</button>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-4 mb-6 flex items-center justify-between">
-          <div className="text-gray-700 font-medium">{dateKey}</div>
-          <div className="font-mono text-lg" suppressHydrationWarning>
-            {now ? now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--:--:--'}
+    <div className="min-h-screen bg-gray-50 py-8 px-4">
+      <div className="max-w-4xl mx-auto">
+        {/* ヘッダー */}
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h1 className="text-2xl font-bold">{userProfile.displayName}のタイムカード</h1>
+            <button
+              onClick={() => router.back()}
+              className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+            >
+              ← 戻る
+            </button>
+          </div>
+          <div className="text-center">
+            <div className="text-5xl font-mono font-bold text-blue-600">
+              {now?.toLocaleTimeString('ja-JP') || '--:--:--'}
+            </div>
+            <div className="text-gray-600 mt-2">
+              {now?.toLocaleDateString('ja-JP', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                weekday: 'long'
+              })}
+            </div>
           </div>
         </div>
 
-        <div className="flex justify-center mb-8">
-          <div className="bg-white rounded-lg shadow p-4 w-full max-w-md">
-            <h2 className="text-lg font-semibold mb-3">打刻状況</h2>
-            {loading && !record ? (
-              <p className="text-gray-500">読み込み中...</p>
-            ) : (
-              <>
-                <ul className="space-y-2 text-sm mb-4">
-                  <li><span className="inline-block w-24 text-gray-600">出勤:</span> {fmt(record?.clockInAt)}</li>
-                  <li><span className="inline-block w-24 text-gray-600">休憩開始:</span> {fmt(record?.breakStartAt)}</li>
-                  <li><span className="inline-block w-24 text-gray-600">休憩終了:</span> {fmt(record?.breakEndAt)}</li>
-                  <li><span className="inline-block w-24 text-gray-600">退勤:</span> {fmt(record?.clockOutAt)}</li>
-                  <li className="border-t pt-2"><span className="inline-block w-24 text-gray-600">総労働:</span> <span className="font-medium">{workedMinutes}分</span></li>
-                  <li><span className="inline-block w-24 text-gray-600">休憩時間:</span> <span className="font-medium">{breakMinutes}分</span></li>
-                </ul>
-              </>
-            )}
-            <div className="grid grid-cols-2 gap-2">
-              <button disabled={!canClockIn} onClick={() => updateField('clockInAt')} className={`px-3 py-2 rounded text-white text-sm ${canClockIn ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-300 cursor-not-allowed'}`}>出勤</button>
-              <button disabled={!canClockOut} onClick={() => updateField('clockOutAt')} className={`px-3 py-2 rounded text-white text-sm ${canClockOut ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-300 cursor-not-allowed'}`}>退勤</button>
-              <button disabled={!canBreakStart} onClick={() => updateField('breakStartAt')} className={`px-3 py-2 rounded text-white text-sm ${canBreakStart ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-300 cursor-not-allowed'}`}>休憩開始</button>
-              <button disabled={!canBreakEnd} onClick={() => updateField('breakEndAt')} className={`px-3 py-2 rounded text-white text-sm ${canBreakEnd ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-300 cursor-not-allowed'}`}>休憩終了</button>
+        {/* 打刻ボタン */}
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          <button
+            onClick={clockIn}
+            disabled={!canClockIn}
+            className={`py-8 rounded-lg text-white font-bold text-lg transition-all ${
+              canClockIn
+                ? 'bg-green-600 hover:bg-green-700 active:scale-95'
+                : 'bg-gray-300 cursor-not-allowed'
+            }`}
+          >
+            出勤
+          </button>
+          <button
+            onClick={clockOut}
+            disabled={!canClockOut}
+            className={`py-8 rounded-lg text-white font-bold text-lg transition-all ${
+              canClockOut
+                ? 'bg-red-600 hover:bg-red-700 active:scale-95'
+                : 'bg-gray-300 cursor-not-allowed'
+            }`}
+          >
+            退勤
+          </button>
+          <button
+            onClick={breakStart}
+            disabled={!canBreakStart}
+            className={`py-8 rounded-lg text-white font-bold text-lg transition-all ${
+              canBreakStart
+                ? 'bg-yellow-600 hover:bg-yellow-700 active:scale-95'
+                : 'bg-gray-300 cursor-not-allowed'
+            }`}
+          >
+            休憩開始
+          </button>
+          <button
+            onClick={breakEnd}
+            disabled={!canBreakEnd}
+            className={`py-8 rounded-lg text-white font-bold text-lg transition-all ${
+              canBreakEnd
+                ? 'bg-blue-600 hover:bg-blue-700 active:scale-95'
+                : 'bg-gray-300 cursor-not-allowed'
+            }`}
+          >
+            休憩終了
+          </button>
+        </div>
+
+        {/* タイムカード情報 */}
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-lg font-bold mb-4">本日の記録</h2>
+          <div className="space-y-3">
+            <div className="flex justify-between border-b pb-2">
+              <span className="text-gray-600">出勤時刻</span>
+              <span className="font-mono font-bold">
+                {record?.clockInAt
+                  ? record.clockInAt.toDate().toLocaleTimeString('ja-JP')
+                  : '未打刻'}
+              </span>
             </div>
-            {canStartNew && (
-              <div className="mt-4">
-                <button onClick={startNewTimecard} className="w-full px-3 py-2 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium">新しいタイムカードを開始</button>
-              </div>
-            )}
-            <p className="mt-4 text-xs text-gray-500">※ 一度打刻した項目は修正できません（将来編集機能追加予定）。</p>
+            <div className="flex justify-between border-b pb-2">
+              <span className="text-gray-600">退勤時刻</span>
+              <span className="font-mono font-bold">
+                {record?.clockOutAt
+                  ? record.clockOutAt.toDate().toLocaleTimeString('ja-JP')
+                  : '未打刻'}
+              </span>
+            </div>
+            <div className="flex justify-between border-b pb-2">
+              <span className="text-gray-600">休憩開始</span>
+              <span className="font-mono font-bold">
+                {record?.breakStartAt
+                  ? record.breakStartAt.toDate().toLocaleTimeString('ja-JP')
+                  : '未打刻'}
+              </span>
+            </div>
+            <div className="flex justify-between border-b pb-2">
+              <span className="text-gray-600">休憩終了</span>
+              <span className="font-mono font-bold">
+                {record?.breakEndAt
+                  ? record.breakEndAt.toDate().toLocaleTimeString('ja-JP')
+                  : '未打刻'}
+              </span>
+            </div>
+            <div className="flex justify-between border-b pb-2">
+              <span className="text-gray-600">勤務時間</span>
+              <span className="font-mono font-bold text-blue-600">
+                {hours}時間 {minutes}分
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">休憩時間</span>
+              <span className="font-mono font-bold text-yellow-600">
+                {Math.floor(breakMinutes / 60)}時間 {breakMinutes % 60}分
+              </span>
+            </div>
           </div>
         </div>
       </div>
