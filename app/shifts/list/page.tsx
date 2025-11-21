@@ -99,6 +99,14 @@ export default function AdminShiftListPage() {
               nightStart: o.nightStart ?? '22:00',
               nightEnd: o.nightEnd ?? '05:00',
             });
+            // ラベルを読み込む
+            if (o.shiftLabels && Array.isArray(o.shiftLabels)) {
+              console.log('[Admin List] ラベルを読み込みました:', o.shiftLabels);
+              setShiftLabels(o.shiftLabels);
+            } else {
+              console.log('[Admin List] 保存されたラベルがありません');
+              setShiftLabels([]);
+            }
           }
         } catch (e) {
           console.warn('[Admin List] failed to load org settings', e);
@@ -894,12 +902,12 @@ export default function AdminShiftListPage() {
                                           onClick={handleBarClick}
                                         >
                                           <div
-                                            className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black hover:bg-opacity-20 rounded-l"
+                                            className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black hover:bg-opacity-30 rounded-l opacity-0 group-hover:opacity-100 transition-opacity bg-gray-900 bg-opacity-20"
                                             onMouseDown={(e) => handleDragStart(e, 'start')}
                                           />
-                                          <div className="flex-1 text-left pl-1 pr-2 truncate pointer-events-none">{displayStart} - {displayEnd}</div>
+                                          <div className="flex-1 text-left pl-3 pr-3 truncate pointer-events-none">{displayStart} - {displayEnd}</div>
                                           <div
-                                            className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black hover:bg-opacity-20 rounded-r"
+                                            className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black hover:bg-opacity-30 rounded-r opacity-0 group-hover:opacity-100 transition-opacity bg-gray-900 bg-opacity-20"
                                             onMouseDown={(e) => handleDragStart(e, 'end')}
                                           />
                                         </div>
@@ -1222,9 +1230,24 @@ export default function AdminShiftListPage() {
                     編集
                   </button>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       if (confirm(`「${label.name}」を削除しますか？`)) {
-                        setShiftLabels(shiftLabels.filter(l => l.id !== label.id));
+                        const updatedLabels = shiftLabels.filter(l => l.id !== label.id);
+                        setShiftLabels(updatedLabels);
+                        // Firestoreに保存
+                        if (userProfile?.currentOrganizationId) {
+                          try {
+                            await updateDoc(doc(db, 'organizations', userProfile.currentOrganizationId), {
+                              shiftLabels: updatedLabels
+                            });
+                          } catch (e) {
+                            console.error('ラベルの削除に失敗:', e);
+                          }
+                        }
+                        // 選択中の日付のシフトを再読み込みして表示を更新
+                        if (selectedDay) {
+                          fetchDayShifts(selectedDay);
+                        }
                       }
                     }}
                     className="px-3 py-1 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded"
@@ -1277,28 +1300,45 @@ export default function AdminShiftListPage() {
                     </button>
                   )}
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       if (!editingLabelName.trim()) {
                         alert('名称を入力してください');
                         return;
                       }
                       
+                      let updatedLabels: ShiftLabel[];
                       if (editingLabelId) {
                         // 編集
-                        setShiftLabels(shiftLabels.map(l => 
+                        updatedLabels = shiftLabels.map(l => 
                           l.id === editingLabelId 
                             ? { ...l, name: editingLabelName, color: editingLabelColor }
                             : l
-                        ));
+                        );
+                        setShiftLabels(updatedLabels);
                         setEditingLabelId(null);
                       } else {
                         // 新規追加
                         const newId = `label-${Date.now()}`;
-                        setShiftLabels([...shiftLabels, { 
+                        updatedLabels = [...shiftLabels, { 
                           id: newId, 
                           name: editingLabelName, 
                           color: editingLabelColor 
-                        }]);
+                        }];
+                        setShiftLabels(updatedLabels);
+                      }
+                      // Firestoreに保存
+                      if (userProfile?.currentOrganizationId) {
+                        try {
+                          await updateDoc(doc(db, 'organizations', userProfile.currentOrganizationId), {
+                            shiftLabels: updatedLabels
+                          });
+                        } catch (e) {
+                          console.error('ラベルの保存に失敗:', e);
+                        }
+                      }
+                      // 選択中の日付のシフトを再読み込みして表示を更新
+                      if (selectedDay) {
+                        fetchDayShifts(selectedDay);
                       }
                       setEditingLabelName('');
                       setEditingLabelColor('#8b5cf6');

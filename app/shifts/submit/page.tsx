@@ -268,11 +268,55 @@ export default function ShiftSubmitPage() {
       setResizingShift(null);
     };
 
+    const handleTouchMove = async (e: TouchEvent) => {
+      if (!resizingShift) return;
+      e.preventDefault(); // スクロール防止
+
+      const touch = e.touches[0];
+      const deltaY = touch.pageY - resizingShift.startY;
+      const pixelPerHour = viewMode === 'week' ? 48 : 64;
+      const deltaMin = Math.round((deltaY / pixelPerHour) * 60 / 15) * 15;
+
+      const startMin = timeToMin(resizingShift.originalStart);
+      const endMin = timeToMin(resizingShift.originalEnd);
+
+      let newStartMin = startMin;
+      let newEndMin = endMin;
+
+      if (resizingShift.edge === 'start') {
+        newStartMin = Math.max(0, Math.min(startMin + deltaMin, endMin - 15));
+      } else {
+        newEndMin = Math.min(24 * 60, Math.max(endMin + deltaMin, startMin + 15));
+      }
+
+      try {
+        await updateDoc(doc(db, 'shifts', resizingShift.id), {
+          startTime: minToTime(newStartMin),
+          endTime: minToTime(newEndMin),
+        });
+        if (viewMode === 'month') {
+          await loadMonthShifts(targetMonth);
+        } else {
+          await loadMonthShifts(currentDate);
+        }
+      } catch (e) {
+        console.error('リサイズ中の更新失敗:', e);
+      }
+    };
+
+    const handleTouchEnd = () => {
+      setResizingShift(null);
+    };
+
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd);
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', handleTouchEnd);
     };
   }, [resizingShift, viewMode, targetMonth, currentDate]);
 
@@ -767,6 +811,7 @@ export default function ShiftSubmitPage() {
                     <div
                       key={hour}
                       className={`h-12 border-b border-gray-300 border-opacity-50 ${isLockedDay ? 'cursor-not-allowed' : 'hover:bg-gray-50 cursor-pointer'}`}
+                      style={{ WebkitTapHighlightColor: 'transparent' }}
                       title={isLockedDay ? 'この日のシフトは締切を過ぎています（前月25日12時）' : ''}
                       onMouseDown={(e) => {
                         if (isLockedDay) return;
@@ -868,22 +913,34 @@ export default function ShiftSubmitPage() {
                                 {canSubmitForDate(new Date(shift.date)) && (
                                   <>
                                     <div
-                                      className="resize-handle absolute top-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black hover:bg-opacity-20 opacity-0 group-hover:opacity-100 transition-opacity"
+                                      className="resize-handle absolute top-0 left-0 right-0 h-3 cursor-ns-resize hover:bg-black hover:bg-opacity-30 transition-opacity bg-gray-400 bg-opacity-30"
+                                      style={{ WebkitTapHighlightColor: 'transparent' }}
                                       onMouseDown={(e) => {
                                         e.stopPropagation();
                                         setResizingShift({ id: shift.id!, edge: 'start', originalStart: shift.startTime, originalEnd: shift.endTime, startY: e.pageY });
                                       }}
+                                      onTouchStart={(e) => {
+                                        e.stopPropagation();
+                                        const touch = e.touches[0];
+                                        setResizingShift({ id: shift.id!, edge: 'start', originalStart: shift.startTime, originalEnd: shift.endTime, startY: touch.pageY });
+                                      }}
                                     />
                                     <div
-                                      className="resize-handle absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black hover:bg-opacity-20 opacity-0 group-hover:opacity-100 transition-opacity"
+                                      className="resize-handle absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize hover:bg-black hover:bg-opacity-30 transition-opacity bg-gray-400 bg-opacity-30"
+                                      style={{ WebkitTapHighlightColor: 'transparent' }}
                                       onMouseDown={(e) => {
                                         e.stopPropagation();
                                         setResizingShift({ id: shift.id!, edge: 'end', originalStart: shift.startTime, originalEnd: shift.endTime, startY: e.pageY });
                                       }}
+                                      onTouchStart={(e) => {
+                                        e.stopPropagation();
+                                        const touch = e.touches[0];
+                                        setResizingShift({ id: shift.id!, edge: 'end', originalStart: shift.startTime, originalEnd: shift.endTime, startY: touch.pageY });
+                                      }}
                                     />
                                   </>
                                 )}
-                                <div className="font-semibold pointer-events-none">{shift.startTime}-{shift.endTime}</div>
+                                <div className="font-semibold pointer-events-none py-1">{shift.startTime}-{shift.endTime}</div>
                                 {shift.note && <div className="truncate pointer-events-none">{shift.note}</div>}
                               </div>
                             );
@@ -944,6 +1001,7 @@ export default function ShiftSubmitPage() {
                 <div
                   key={hour}
                   className={`h-16 border-b border-gray-300 border-opacity-50 ${isLockedDay ? 'cursor-not-allowed' : 'hover:bg-gray-50 cursor-pointer'}`}
+                  style={{ WebkitTapHighlightColor: 'transparent' }}
                   title={isLockedDay ? 'この日のシフトは締切を過ぎています（前月25日12時）' : ''}
                   onMouseDown={(e) => {
                     if (isLockedDay) return;
@@ -1046,23 +1104,35 @@ export default function ShiftSubmitPage() {
                     {canSubmitForDate(new Date(shift.date)) && (
                       <>
                         <div
-                          className="resize-handle absolute top-0 left-0 right-0 h-3 cursor-ns-resize hover:bg-black hover:bg-opacity-20 opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="resize-handle absolute top-0 left-0 right-0 h-4 cursor-ns-resize hover:bg-black hover:bg-opacity-30 transition-opacity bg-gray-400 bg-opacity-30"
+                          style={{ WebkitTapHighlightColor: 'transparent' }}
                           onMouseDown={(e) => {
                             e.stopPropagation();
                             setResizingShift({ id: shift.id!, edge: 'start', originalStart: shift.startTime, originalEnd: shift.endTime, startY: e.pageY });
                           }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                            const touch = e.touches[0];
+                            setResizingShift({ id: shift.id!, edge: 'start', originalStart: shift.startTime, originalEnd: shift.endTime, startY: touch.pageY });
+                          }}
                         />
                         <div
-                          className="resize-handle absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize hover:bg-black hover:bg-opacity-20 opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="resize-handle absolute bottom-0 left-0 right-0 h-4 cursor-ns-resize hover:bg-black hover:bg-opacity-30 transition-opacity bg-gray-400 bg-opacity-30"
+                          style={{ WebkitTapHighlightColor: 'transparent' }}
                           onMouseDown={(e) => {
                             e.stopPropagation();
                             setResizingShift({ id: shift.id!, edge: 'end', originalStart: shift.startTime, originalEnd: shift.endTime, startY: e.pageY });
                           }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                            const touch = e.touches[0];
+                            setResizingShift({ id: shift.id!, edge: 'end', originalStart: shift.startTime, originalEnd: shift.endTime, startY: touch.pageY });
+                          }}
                         />
                       </>
                     )}
-                    <div className="font-semibold pointer-events-none">{shift.startTime}-{shift.endTime}</div>
-                    {shift.note && <div className="mt-1 pointer-events-none">{shift.note}</div>}
+                    <div className="font-semibold pointer-events-none pt-2">{shift.startTime}-{shift.endTime}</div>
+                    {shift.note && <div className="mt-1 pointer-events-none pb-2">{shift.note}</div>}
                   </div>
                 );
               })}
