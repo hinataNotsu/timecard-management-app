@@ -4,9 +4,15 @@ import { useEffect, useMemo, useState } from 'react';
 import JapaneseHolidays from 'japanese-holidays';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { collection, doc, getDoc, getDocs, query, where, orderBy, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, where, orderBy, updateDoc, addDoc, Timestamp as FirestoreTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Timestamp } from 'firebase/firestore';
+
+interface ShiftLabel {
+  id: string;
+  name: string;
+  color: string;
+}
 
 interface ShiftRow {
   id: string;
@@ -25,6 +31,7 @@ interface ShiftRow {
   approvedByName?: string | null;
   approvedAt?: Date | null;
   rejectReason?: string | null;
+  labelId?: string | null; // シフトラベルID
 }
 
 export default function AdminShiftListPage() {
@@ -47,6 +54,27 @@ export default function AdminShiftListPage() {
   const [saving, setSaving] = useState(false);
   const [editingShiftId, setEditingShiftId] = useState<string | null>(null);
   const [editModalTime, setEditModalTime] = useState<{ startTime: string; endTime: string }>({ startTime: '', endTime: '' });
+  const [editingShift, setEditingShift] = useState<ShiftRow | null>(null);
+  const [shiftLabels, setShiftLabels] = useState<ShiftLabel[]>([]);
+  const [showLabelLegend, setShowLabelLegend] = useState(true);
+  const [splitMode, setSplitMode] = useState(false);
+  const [splitTime, setSplitTime] = useState<string>('');
+  const [tempLabelId, setTempLabelId] = useState<string | null | undefined>(undefined);
+  const [showLabelManager, setShowLabelManager] = useState(false);
+  const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
+  const [editingLabelName, setEditingLabelName] = useState('');
+  const [editingLabelColor, setEditingLabelColor] = useState('#8b5cf6');
+  
+  const availableColors = [
+    { name: '紫', value: '#8b5cf6' },
+    { name: 'ピンク', value: '#ec4899' },
+    { name: '青', value: '#3b82f6' },
+    { name: '水色', value: '#06b6d4' },
+    { name: '緑', value: '#10b981' },
+    { name: '黄色', value: '#eab308' },
+    { name: 'オレンジ', value: '#f97316' },
+    { name: '茶色', value: '#92400e' },
+  ];
 
   useEffect(() => {
     if (!userProfile?.isManage) {
@@ -205,6 +233,7 @@ export default function AdminShiftListPage() {
               originalStartTime: data.originalStartTime || data.startTime, // 元の希望時間を保存
               originalEndTime: data.originalEndTime || data.endTime, // 元の希望時間を保存
               note: data.note || '',
+              labelId: data.labelId || null,
               hourlyWage: data.hourlyWage != null ? Number(data.hourlyWage) : undefined,
               status: (data.status as any) || 'pending',
               approvedByName: await getApproverName(data.approvedBy),
@@ -292,25 +321,11 @@ export default function AdminShiftListPage() {
     if (outOfRangeShifts.length > 0) {
       const message = `以下のシフトが希望外の時間を含んでいます。保存してよろしいですか？\n\n${outOfRangeShifts.map(s => `${s.userName} (${s.original} → ${s.modified})`).join('\n')}`;
       if (!confirm(message)) {
-        // キャンセルされた場合、希望時間外のシフトを元の希望時間に戻す
+        // キャンセルされた場合、希望時間外のシフトの編集を取り消す（元の時間に戻す）
         const newEditedShifts = new Map(editedShifts);
         for (const item of outOfRangeShifts) {
-          const shift = dayShifts.find(s => s.id === item.shiftId);
-          if (shift) {
-            const originalStart = shift.originalStartTime || shift.startTime;
-            const originalEnd = shift.originalEndTime || shift.endTime;
-            const currentEdit = newEditedShifts.get(item.shiftId);
-            if (currentEdit) {
-              // 希望時間内に収まるように調整
-              let adjustedStart = currentEdit.startTime;
-              let adjustedEnd = currentEdit.endTime;
-              
-              if (adjustedStart < originalStart) adjustedStart = originalStart;
-              if (adjustedEnd > originalEnd) adjustedEnd = originalEnd;
-              
-              newEditedShifts.set(item.shiftId, { startTime: adjustedStart, endTime: adjustedEnd });
-            }
-          }
+          // 編集を削除することで、元の時間（shift.startTime, shift.endTime）が表示される
+          newEditedShifts.delete(item.shiftId);
         }
         setEditedShifts(newEditedShifts);
         return;
@@ -457,6 +472,7 @@ export default function AdminShiftListPage() {
           approvedByName: approverName,
           approvedAt: data.approvedAt ? (data.approvedAt as Timestamp).toDate() : null,
           rejectReason: data.rejectReason || null,
+          labelId: data.labelId || null,
         });
       }
 
@@ -638,7 +654,7 @@ export default function AdminShiftListPage() {
                     const dateColor = holiday || dow === 0 ? 'text-red-600' : dow === 6 ? 'text-blue-600' : inMonth ? 'text-gray-900' : 'text-gray-300';
                     const isSelected = selectedDay && selectedDay.getFullYear() === d.getFullYear() && selectedDay.getMonth() === d.getMonth() && selectedDay.getDate() === d.getDate();
                     return (
-                      <button key={d.toISOString()} onClick={() => { setSelectedDay(d); fetchDayShifts(d); }} className={`relative min-h-24 p-2 border-r border-b border-gray-300 border-opacity-50 last:border-r-0 ${!inMonth?'bg-gray-50':''} ${isSelected ? 'bg-blue-50 border-blue-200' : 'bg-white'}`}>
+                      <button key={d.toISOString()} onClick={() => { setSelectedDay(d); fetchDayShifts(d); }} className={`relative min-h-24 p-2 border-r border-b border-gray-300 border-opacity-50 last:border-r-0 transition-colors ${!inMonth?'bg-gray-50':''} ${isSelected ? 'bg-blue-50 border-blue-200' : 'bg-white hover:bg-gray-100'}`}>
                         <div className={`absolute top-1 left-1 text-sm ${!inMonth ? 'text-gray-400' : dateColor} ${isSelected ? 'font-bold' : ''}`}>{d.getDate()}</div>
                         <div className="text-[11px] text-gray-400" style={{ visibility: 'hidden' }}>{inMonth ? '' : ''}</div>
                       </button>
@@ -648,29 +664,66 @@ export default function AdminShiftListPage() {
               </div>
             </div>
 
-            {/* 選択日があれば時間軸表示（全ユーザー） */}
+            {/* 選択日があれば時間軸表示（全ユーザー）- モーダル表示 */}
             {selectedDay && (
-              <div className="mt-4 border-t pt-4">
-                <div className="mb-2 flex items-center justify-between">
-                  <div className="font-semibold">{selectedDay.getFullYear()}年{selectedDay.getMonth() + 1}月{selectedDay.getDate()}日 のシフト（時間軸）</div>
-                  <div className="flex items-center gap-2">
-                    {editedShifts.size > 0 && (
-                      <button
-                        onClick={saveChanges}
-                        disabled={saving}
-                        className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm font-semibold"
+              <div className="fixed inset-0 bg-black/50 z-40 flex items-start justify-center pt-8 p-4" onClick={() => { setSelectedDay(null); setDayShifts([]); setEditedShifts(new Map()); }}>
+                <div className="bg-white rounded-lg shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                  <div className="px-6 py-4 border-b flex items-center justify-between bg-gray-50">
+                    <div className="font-semibold text-lg">{selectedDay.getFullYear()}年{selectedDay.getMonth() + 1}月{selectedDay.getDate()}日 のシフト（時間軸）</div>
+                    <div className="flex items-center gap-2">
+                      {editedShifts.size > 0 && (
+                        <button
+                          onClick={saveChanges}
+                          disabled={saving}
+                          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm font-semibold"
+                        >
+                          {saving ? '保存中...' : `変更を保存 (${editedShifts.size})`}
+                        </button>
+                      )}
+                      <button 
+                        onClick={() => { setSelectedDay(null); setDayShifts([]); setEditedShifts(new Map()); }} 
+                        className="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-200 text-gray-600 hover:text-gray-900 text-xl font-bold"
+                        title="閉じる"
                       >
-                        {saving ? '保存中...' : `変更を保存 (${editedShifts.size})`}
+                        ×
                       </button>
-                    )}
-                    <button onClick={() => { setSelectedDay(null); setDayShifts([]); setEditedShifts(new Map()); }} className="px-2 py-1 border rounded text-sm">閉じる</button>
+                    </div>
                   </div>
-                </div>
-                {dayLoading ? (
-                  <div className="text-center py-8">読み込み中...</div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <div className="min-w-[900px]">
+                  <div className="flex-1 overflow-y-auto p-6">
+                    {dayLoading ? (
+                      <div className="text-center py-8">読み込み中...</div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        {/* 凡例 */}
+                        <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
+                          <span className="font-semibold text-gray-700">色の意味:</span>
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#2563eb' }}></div>
+                            <span>申請中</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#dc2626' }}></div>
+                            <span>却下</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#16a34a' }}></div>
+                            <span>承認済み（未分類）</span>
+                          </div>
+                          {shiftLabels.map(label => (
+                            <div key={label.id} className="flex items-center gap-1.5">
+                              <div className="w-4 h-4 rounded" style={{ backgroundColor: label.color }}></div>
+                              <span>{label.name}</span>
+                            </div>
+                          ))}
+                          <button
+                            onClick={() => setShowLabelManager(true)}
+                            className="ml-2 px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-sm font-medium flex items-center gap-1"
+                          >
+                            <span className="text-lg leading-none">+</span>
+                            <span>ラベル管理</span>
+                          </button>
+                        </div>
+                        <div className="min-w-[900px]">
                       {/* 時間目盛り */}
                       <div className="flex items-center">
                         <div className="w-40" />
@@ -755,18 +808,52 @@ export default function AdminShiftListPage() {
                                         const rect = timeline.getBoundingClientRect();
                                         const totalWidth = rect.width;
                                         
+                                        // 隣接するシフトを検出
+                                        const findAdjacentShift = (time: string, adjacentType: 'before' | 'after') => {
+                                          return shiftsForUser.find(shift => {
+                                            if (shift.id === s.id) return false;
+                                            const shiftEdited = editedShifts.get(shift.id);
+                                            const shiftStart = shiftEdited?.startTime || shift.startTime;
+                                            const shiftEnd = shiftEdited?.endTime || shift.endTime;
+                                            return adjacentType === 'after' ? shiftStart === time : shiftEnd === time;
+                                          });
+                                        };
+                                        
                                         const onMouseMove = (moveEvent: MouseEvent) => {
                                           const offsetX = moveEvent.clientX - rect.left;
                                           const pct = Math.max(0, Math.min(100, (offsetX / totalWidth) * 100));
                                           const minutes = roundTo15((pct / 100) * 24 * 60);
+                                          const newTime = minToTime(minutes);
                                           
                                           if (edge === 'start') {
                                             if (minutes < endMin) {
-                                              setEditedShifts(prev => new Map(prev).set(s.id, { startTime: minToTime(minutes), endTime: displayEnd }));
+                                              const newMap = new Map(editedShifts);
+                                              newMap.set(s.id, { startTime: newTime, endTime: displayEnd });
+                                              
+                                              // 開始時刻を動かす場合、その時刻で終わる前のシフトも一緒に動かす
+                                              const adjacentShift = findAdjacentShift(displayStart, 'before');
+                                              if (adjacentShift) {
+                                                const adjEdited = editedShifts.get(adjacentShift.id);
+                                                const adjStart = adjEdited?.startTime || adjacentShift.startTime;
+                                                newMap.set(adjacentShift.id, { startTime: adjStart, endTime: newTime });
+                                              }
+                                              
+                                              setEditedShifts(newMap);
                                             }
                                           } else {
                                             if (minutes > startMin) {
-                                              setEditedShifts(prev => new Map(prev).set(s.id, { startTime: displayStart, endTime: minToTime(minutes) }));
+                                              const newMap = new Map(editedShifts);
+                                              newMap.set(s.id, { startTime: displayStart, endTime: newTime });
+                                              
+                                              // 終了時刻を動かす場合、その時刻で始まる次のシフトも一緒に動かす
+                                              const adjacentShift = findAdjacentShift(displayEnd, 'after');
+                                              if (adjacentShift) {
+                                                const adjEdited = editedShifts.get(adjacentShift.id);
+                                                const adjEnd = adjEdited?.endTime || adjacentShift.endTime;
+                                                newMap.set(adjacentShift.id, { startTime: newTime, endTime: adjEnd });
+                                              }
+                                              
+                                              setEditedShifts(newMap);
                                             }
                                           }
                                         };
@@ -780,19 +867,29 @@ export default function AdminShiftListPage() {
                                         document.addEventListener('mouseup', onMouseUp);
                                       };
                                       
-                                      const bgColor = edited ? '#f97316' : (s.status === 'approved' ? '#16a34a' : s.status === 'rejected' ? '#dc2626' : '#2563eb');
+                                      const getShiftColor = () => {
+                                        if (s.status === 'rejected') return '#dc2626'; // 却下は赤
+                                        if (s.status === 'approved' && s.labelId) {
+                                          const label = shiftLabels.find(l => l.id === s.labelId);
+                                          if (label) return label.color;
+                                        }
+                                        if (s.status === 'approved') return '#16a34a'; // ラベルなし承認は緑
+                                        return '#2563eb'; // 申請中は青
+                                      };
+                                      const bgColor = getShiftColor();
                                       
                                       const handleBarClick = (e: React.MouseEvent) => {
                                         // ドラッグハンドルをクリックした場合は無視
                                         if ((e.target as HTMLElement).classList.contains('cursor-ew-resize')) return;
                                         setEditingShiftId(s.id);
                                         setEditModalTime({ startTime: displayStart, endTime: displayEnd });
+                                        setEditingShift(s);
                                       };
                                       
                                       return (
                                         <div 
                                           key={s.id + '-' + idx} 
-                                          className="absolute top-1/4 h-1/2 rounded text-[12px] text-white flex items-center px-2 group cursor-pointer" 
+                                          className="absolute top-1/4 h-1/2 rounded text-[12px] text-white flex items-center group cursor-pointer" 
                                           style={{ left: `${leftPct}%`, width: `${finalWidthPct}%`, backgroundColor: bgColor, zIndex: 20, boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}
                                           onClick={handleBarClick}
                                         >
@@ -800,7 +897,7 @@ export default function AdminShiftListPage() {
                                             className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black hover:bg-opacity-20 rounded-l"
                                             onMouseDown={(e) => handleDragStart(e, 'start')}
                                           />
-                                          <div className="flex-1 text-center truncate pointer-events-none">{displayStart} - {displayEnd}</div>
+                                          <div className="flex-1 text-left pl-1 pr-2 truncate pointer-events-none">{displayStart} - {displayEnd}</div>
                                           <div
                                             className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black hover:bg-opacity-20 rounded-r"
                                             onMouseDown={(e) => handleDragStart(e, 'end')}
@@ -815,21 +912,245 @@ export default function AdminShiftListPage() {
                           });
                         })()}
                       </div>
-                    </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
               </div>
             )}
           </div>
         )}
       </div>
 
-      {/* 時間編集モーダル */}
-      {editingShiftId && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setEditingShiftId(null)}>
-          <div className="bg-white rounded-lg p-6 w-96" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold mb-4">シフト時間の編集</h3>
-            <div className="space-y-4">
+      {/* シフト編集・承認モーダル */}
+      {editingShiftId && editingShift && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => { setEditingShiftId(null); setEditingShift(null); setTempLabelId(undefined); }}>
+          <div className="bg-white rounded-lg p-6 w-[480px]" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-start justify-between">
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold">シフト操作</h3>
+                <div className="mt-2 text-sm text-gray-600">
+                  <div className="flex items-center gap-2 mb-1">
+                    <img src={avatarUrl(editingShift.avatarSeed || editingShift.userName, editingShift.avatarBgColor)} alt={editingShift.userName} className="w-6 h-6 rounded-full ring-1 ring-gray-200" />
+                    <span className="font-medium">{editingShift.userName}</span>
+                  </div>
+                  <div>ステータス: <span className={`font-semibold ${editingShift.status === 'approved' ? 'text-green-600' : editingShift.status === 'rejected' ? 'text-red-600' : 'text-blue-600'}`}>
+                    {editingShift.status === 'approved' ? '承認済み' : editingShift.status === 'rejected' ? '却下' : '申請中'}
+                  </span></div>
+                </div>
+              </div>
+              
+              <div className="flex gap-2 ml-4">
+                <button
+                  disabled={editingShift.status === 'approved'}
+                  onClick={async () => {
+                    await approve(editingShiftId);
+                    setEditingShiftId(null);
+                    setEditingShift(null);
+                    await fetchDayShifts(selectedDay!);
+                  }}
+                  className={`px-5 py-2.5 rounded-md font-semibold ${
+                    editingShift.status === 'approved' 
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                      : 'bg-green-600 text-white hover:bg-green-700'
+                  }`}
+                >
+                  承認
+                </button>
+                <button
+                  onClick={async () => {
+                    await reject(editingShiftId);
+                    setEditingShiftId(null);
+                    setEditingShift(null);
+                    await fetchDayShifts(selectedDay!);
+                  }}
+                  className="px-5 py-2.5 bg-red-600 text-white rounded-md hover:bg-red-700 font-semibold"
+                >
+                  却下
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-4 mb-6">
+              {editingShift.status === 'approved' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">ラベル（色分け）</label>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => {
+                          setTempLabelId(null);
+                        }}
+                        className={`px-3 py-1.5 rounded border text-sm font-medium ${
+                          (tempLabelId === undefined ? !editingShift.labelId : tempLabelId === null) ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        なし
+                      </button>
+                      {shiftLabels.map(label => (
+                        <button
+                          key={label.id}
+                          onClick={() => {
+                            setTempLabelId(label.id);
+                          }}
+                          className={`px-3 py-1.5 rounded border text-sm font-medium transition-all hover:brightness-90 ${
+                            (tempLabelId === undefined ? editingShift.labelId === label.id : tempLabelId === label.id) ? 'text-white border-transparent' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                          }`}
+                          style={(tempLabelId === undefined ? editingShift.labelId === label.id : tempLabelId === label.id) ? { backgroundColor: label.color } : {}}
+                        >
+                          {label.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <button
+                      onClick={async () => {
+                        if (tempLabelId !== undefined) {
+                          const editedTime = editedShifts.get(editingShiftId);
+                          const updateData: any = { labelId: tempLabelId };
+                          
+                          // editedShiftsに時間変更がある場合は、その時間も一緒に保存
+                          if (editedTime) {
+                            updateData.startTime = editedTime.startTime;
+                            updateData.endTime = editedTime.endTime;
+                          }
+                          
+                          const newMap = new Map(editedShifts);
+                          newMap.delete(editingShiftId);
+                          setEditedShifts(newMap);
+                          
+                          await updateDoc(doc(db, 'shifts', editingShiftId), updateData);
+                          await fetchDayShifts(selectedDay!);
+                          setEditingShiftId(null);
+                          setEditingShift(null);
+                          setTempLabelId(undefined);
+                        }
+                      }}
+                      disabled={tempLabelId === undefined}
+                      className={`w-full py-2.5 rounded-md font-semibold ${
+                        tempLabelId === undefined
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-blue-600 text-white hover:bg-blue-700'
+                      }`}
+                    >
+                      役職確定
+                    </button>
+                  </div>
+
+                  <div className="border-t pt-4">
+                    <button
+                      onClick={() => {
+                        setSplitMode(!splitMode);
+                        if (!splitMode) {
+                          const start = editModalTime.startTime;
+                          const end = editModalTime.endTime;
+                          const startMin = parseInt(start.split(':')[0]) * 60 + parseInt(start.split(':')[1]);
+                          const endMin = parseInt(end.split(':')[0]) * 60 + parseInt(end.split(':')[1]);
+                          const midMin = Math.floor((startMin + endMin) / 2);
+                          const midHour = Math.floor(midMin / 60);
+                          const midMinute = midMin % 60;
+                          setSplitTime(`${String(midHour).padStart(2, '0')}:${String(midMinute).padStart(2, '0')}`);
+                        }
+                      }}
+                      className="w-full px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium text-sm"
+                    >
+                      {splitMode ? 'キャンセル' : 'シフトを分割（例: ホール→キッチン）'}
+                    </button>
+                    
+                    {splitMode && (
+                      <div className="mt-4 space-y-4 bg-indigo-50 p-4 rounded-md">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">分割時刻</label>
+                          <input
+                            type="time"
+                            value={splitTime}
+                            onChange={(e) => setSplitTime(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                          <p className="text-xs text-gray-600 mt-1">この時刻で2つのシフトに分割されます</p>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-gray-700 mb-2">前半 ({editModalTime.startTime}～{splitTime})</p>
+                            <div className="space-y-1">
+                              {shiftLabels.map(label => (
+                                <button
+                                  key={label.id}
+                                  onClick={async () => {
+                                    if (!splitTime || splitTime <= editModalTime.startTime || splitTime >= editModalTime.endTime) {
+                                      alert('有効な分割時刻を入力してください');
+                                      return;
+                                    }
+                                    
+                                    try {
+                                      // 元のシフトを前半に更新
+                                      await updateDoc(doc(db, 'shifts', editingShiftId), {
+                                        endTime: splitTime,
+                                        labelId: label.id,
+                                      });
+                                      
+                                      // 後半の新しいシフトを作成
+                                      const userRef = doc(db, 'users', editingShift.userId);
+                                      const dateTs = Timestamp.fromDate(editingShift.date);
+                                      
+                                      await addDoc(collection(db, 'shifts'), {
+                                        organizationId: userProfile!.currentOrganizationId,
+                                        userRef: userRef,
+                                        createdTime: Timestamp.now(),
+                                        date: dateTs,
+                                        startTime: splitTime,
+                                        endTime: editModalTime.endTime,
+                                        originalStartTime: editingShift.originalStartTime,
+                                        originalEndTime: editingShift.originalEndTime,
+                                        note: editingShift.note || '',
+                                        hourlyWage: editingShift.hourlyWage,
+                                        status: 'approved',
+                                        approvedBy: null,
+                                        approvedAt: null,
+                                        rejectReason: null,
+                                        labelId: null,
+                                      });
+                                      
+                                      console.log('[Split] シフト分割成功');
+                                      
+                                      // 編集中のシフトをクリア
+                                      const newEditedShifts = new Map(editedShifts);
+                                      newEditedShifts.delete(editingShiftId);
+                                      setEditedShifts(newEditedShifts);
+                                      
+                                      setSplitMode(false);
+                                      setEditingShiftId(null);
+                                      setEditingShift(null);
+                                      await fetchDayShifts(selectedDay!);
+                                      alert('前半を「' + label.name + '」に設定しました。後半のラベルも設定してください。');
+                                    } catch (e) {
+                                      console.error('Split failed', e);
+                                      alert('分割に失敗しました');
+                                    }
+                                  }}
+                                  className="w-full px-3 py-2 rounded text-sm font-medium text-white"
+                                  style={{ backgroundColor: label.color }}
+                                >
+                                  {label.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          
+                          <div>
+                            <p className="text-sm font-medium text-gray-700 mb-2">後半 ({splitTime}～{editModalTime.endTime})</p>
+                            <p className="text-xs text-gray-600">前半のラベルを選択後、後半のシフトをクリックしてラベルを設定できます</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">開始時刻</label>
                 <input
@@ -849,25 +1170,153 @@ export default function AdminShiftListPage() {
                 />
               </div>
             </div>
-            <div className="mt-6 flex justify-end gap-2">
+
+            <div className="border-t pt-4">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setEditingShiftId(null); setEditingShift(null); }}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={() => {
+                    if (editModalTime.startTime && editModalTime.endTime) {
+                      setEditedShifts(prev => new Map(prev).set(editingShiftId, editModalTime));
+                      setEditingShiftId(null);
+                      setEditingShift(null);
+                    } else {
+                      alert('開始時刻と終了時刻を入力してください');
+                    }
+                  }}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  時間を変更
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ラベル管理モーダル */}
+      {showLabelManager && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setShowLabelManager(false)}>
+          <div className="bg-white rounded-lg p-6 w-[500px] max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold mb-4">役職ラベル管理</h3>
+            
+            {/* 既存ラベル一覧 */}
+            <div className="space-y-2 mb-4">
+              {shiftLabels.map(label => (
+                <div key={label.id} className="flex items-center gap-2 p-3 border rounded">
+                  <div className="w-6 h-6 rounded" style={{ backgroundColor: label.color }}></div>
+                  <span className="flex-1 font-medium">{label.name}</span>
+                  <button
+                    onClick={() => {
+                      setEditingLabelId(label.id);
+                      setEditingLabelName(label.name);
+                      setEditingLabelColor(label.color);
+                    }}
+                    className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded"
+                  >
+                    編集
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirm(`「${label.name}」を削除しますか？`)) {
+                        setShiftLabels(shiftLabels.filter(l => l.id !== label.id));
+                      }
+                    }}
+                    className="px-3 py-1 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded"
+                  >
+                    削除
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* 新規追加・編集フォーム */}
+            <div className="border-t pt-4">
+              <h4 className="font-medium mb-3">{editingLabelId ? 'ラベルを編集' : '新しいラベルを追加'}</h4>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">名称</label>
+                  <input
+                    type="text"
+                    value={editingLabelName}
+                    onChange={(e) => setEditingLabelName(e.target.value)}
+                    placeholder="例: ホール、キッチン"
+                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">色</label>
+                  <div className="flex flex-wrap gap-2">
+                    {availableColors.map(color => (
+                      <button
+                        key={color.value}
+                        onClick={() => setEditingLabelColor(color.value)}
+                        className={`w-10 h-10 rounded border-2 ${editingLabelColor === color.value ? 'border-gray-900' : 'border-gray-300'}`}
+                        style={{ backgroundColor: color.value }}
+                        title={color.name}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  {editingLabelId && (
+                    <button
+                      onClick={() => {
+                        setEditingLabelId(null);
+                        setEditingLabelName('');
+                        setEditingLabelColor('#8b5cf6');
+                      }}
+                      className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded"
+                    >
+                      キャンセル
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      if (!editingLabelName.trim()) {
+                        alert('名称を入力してください');
+                        return;
+                      }
+                      
+                      if (editingLabelId) {
+                        // 編集
+                        setShiftLabels(shiftLabels.map(l => 
+                          l.id === editingLabelId 
+                            ? { ...l, name: editingLabelName, color: editingLabelColor }
+                            : l
+                        ));
+                        setEditingLabelId(null);
+                      } else {
+                        // 新規追加
+                        const newId = `label-${Date.now()}`;
+                        setShiftLabels([...shiftLabels, { 
+                          id: newId, 
+                          name: editingLabelName, 
+                          color: editingLabelColor 
+                        }]);
+                      }
+                      setEditingLabelName('');
+                      setEditingLabelColor('#8b5cf6');
+                    }}
+                    className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium"
+                  >
+                    {editingLabelId ? '更新' : '追加'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 pt-4 border-t">
               <button
-                onClick={() => setEditingShiftId(null)}
-                className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+                onClick={() => setShowLabelManager(false)}
+                className="w-full px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded font-medium"
               >
-                キャンセル
-              </button>
-              <button
-                onClick={() => {
-                  if (editModalTime.startTime && editModalTime.endTime) {
-                    setEditedShifts(prev => new Map(prev).set(editingShiftId, editModalTime));
-                    setEditingShiftId(null);
-                  } else {
-                    alert('開始時刻と終了時刻を入力してください');
-                  }
-                }}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-              >
-                適用
+                閉じる
               </button>
             </div>
           </div>

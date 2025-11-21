@@ -141,12 +141,15 @@ service cloud.firestore {
       // 読み取り: ログイン済み & 同じ組織のメンバー & 削除済みでない
       allow read: if signedIn() && isNotDeleted() && isMember(resource.data.organizationId);
 
-      // 作成: ログイン済み & 所属組織のシフト & 自分のuserRef & 削除済みでない
+      // 作成: ログイン済み & 所属組織のシフト & (自分のuserRef or 管理者) & 削除済みでない
       // デバッグ用に条件を分けて記述
       allow create: if signedIn() &&
               isNotDeleted() &&
-              request.resource.data.userRef == /databases/$(database)/documents/users/$(request.auth.uid) &&
               isMember(request.resource.data.organizationId) &&
+              (
+                request.resource.data.userRef == /databases/$(database)/documents/users/$(request.auth.uid) ||
+                isManage()
+              ) &&
               submissionAllowed(request.resource.data.organizationId, request.resource.data.date);
 
       // 更新:
