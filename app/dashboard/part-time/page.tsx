@@ -72,7 +72,7 @@ export default function PartTimeDashboard() {
               holidayPremiumRate: Number(o.holidayPremiumRate ?? 0.35),
               holidayIncludesWeekend: o.holidayIncludesWeekend ?? true,
               transportAllowanceEnabled: !!o.transportAllowanceEnabled,
-              isWatchAdmin: o.isWatchAdmin !== false, // デフォルトtrue
+              isWatchAdmin: o.isWatchAdmin === true, // デフォルトfalse（初期非表示）
             });
           }
         } catch {}
@@ -269,8 +269,8 @@ export default function PartTimeDashboard() {
             <p className="text-xs sm:text-sm text-gray-600">対象シフト: {(estimate.minutes / 60).toFixed(1)}時間</p>
           </div>
 
-          {/* タイムカードカード - isWatchAdminがfalseの時のみ表示 */}
-          {orgSettings && !orgSettings.isWatchAdmin && (
+          {/* タイムカードカード - isWatchAdminがfalse（初期値）の時のみ表示 */}
+          {orgSettings && orgSettings.isWatchAdmin === false && (
             <div className="bg-white rounded-lg shadow p-4 sm:p-6">
               <h2 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">タイムカード</h2>
               <p className="text-sm sm:text-base text-gray-600 mb-3 sm:mb-4">出退勤の打刻</p>
