@@ -77,25 +77,25 @@ export default function ProfileSetupPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-12">
-      <div className="max-w-md w-full space-y-8">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-3 sm:px-4 py-6 sm:py-12">
+      <div className="max-w-md w-full space-y-6 sm:space-y-8">
         <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+          <h2 className="mt-4 sm:mt-6 text-center text-2xl sm:text-3xl font-extrabold text-gray-900">
             プロフィール設定
           </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
+          <p className="mt-2 text-center text-sm sm:text-base text-gray-600">
             基本情報を入力してください
           </p>
         </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+        <form className="mt-6 sm:mt-8 space-y-4 sm:space-y-6" onSubmit={handleSubmit}>
           {error && (
-            <div className="rounded-md bg-red-50 p-4">
-              <p className="text-sm text-red-800">{error}</p>
+            <div className="rounded-md bg-red-50 p-3 sm:p-4">
+              <p className="text-xs sm:text-sm text-red-800">{error}</p>
             </div>
           )}
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             <div>
-              <label htmlFor="displayName" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="displayName" className="block text-sm sm:text-base font-medium text-gray-700 mb-1">
                 氏名 <span className="text-red-600">*</span>
               </label>
               <input
@@ -105,14 +105,14 @@ export default function ProfileSetupPage() {
                 required
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                className="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                className="appearance-none relative block w-full px-3 py-2.5 sm:py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm sm:text-base"
                 placeholder="山田 太郎"
                 maxLength={20}
               />
             </div>
 
             <div>
-              <label htmlFor="phoneNumber" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="phoneNumber" className="block text-sm sm:text-base font-medium text-gray-700 mb-1">
                 電話番号（任意）
               </label>
               <input
@@ -121,13 +121,13 @@ export default function ProfileSetupPage() {
                 type="tel"
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
-                className="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                className="appearance-none relative block w-full px-3 py-2.5 sm:py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm sm:text-base"
                 placeholder="090-1234-5678"
               />
             </div>
 
             <div>
-              <label htmlFor="birthDate" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="birthDate" className="block text-sm sm:text-base font-medium text-gray-700 mb-1">
                 生年月日（任意）
               </label>
               <input
@@ -136,12 +136,12 @@ export default function ProfileSetupPage() {
                 type="date"
                 value={birthDate}
                 onChange={(e) => setBirthDate(e.target.value)}
-                className="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                className="appearance-none relative block w-full px-3 py-2.5 sm:py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm sm:text-base"
               />
             </div>
 
             <div>
-              <label htmlFor="address" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="address" className="block text-sm sm:text-base font-medium text-gray-700 mb-1">
                 住所（任意）
               </label>
               <textarea
@@ -150,7 +150,7 @@ export default function ProfileSetupPage() {
                 rows={3}
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                className="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                className="appearance-none relative block w-full px-3 py-2.5 sm:py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm sm:text-base"
                 placeholder="東京都渋谷区..."
               />
             </div>
@@ -160,7 +160,7 @@ export default function ProfileSetupPage() {
             <button
               type="submit"
               disabled={loading}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              className="group relative w-full flex justify-center py-3 sm:py-2 px-4 border border-transparent text-sm sm:text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
             >
               {loading ? '保存中...' : '次へ'}
             </button>

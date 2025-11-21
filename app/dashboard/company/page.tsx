@@ -182,7 +182,7 @@ export default function CompanyDashboard() {
           </div>
 
           {/* タイムカードカード (isWatchAdmin=trueの場合のみ表示) */}
-          {organization?.isWatchAdmin !== false && (
+          {organization?.isWatchAdmin === true && (
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">タイムカード</h2>
               <p className="text-gray-600 mb-4">スタッフのタイムカード管理</p>
