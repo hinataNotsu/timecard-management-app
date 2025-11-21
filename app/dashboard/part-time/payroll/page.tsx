@@ -46,15 +46,6 @@ export default function PartTimePayrollPage() {
   } | null>(null);
   const [transportPerShift, setTransportPerShift] = useState<number>(0);
 
-  // アクセス制御: アルバイトのみ
-  useEffect(() => {
-    if (!userProfile) return;
-    if (userProfile.isManage) {
-      router.push('/dashboard/company');
-      return;
-    }
-  }, [userProfile, router]);
-
   useEffect(() => {
     const load = async () => {
       if (!userProfile?.currentOrganizationId || !userProfile.uid) return;
