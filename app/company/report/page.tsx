@@ -3,28 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { collection, query, where, getDocs, doc, getDoc, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, Timestamp, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import JapaneseHolidays from 'japanese-holidays';
-
-interface TimecardRow {
-  id: string;
-  userId: string;
-  dateKey: string;
-  date: Date;
-  clockInAt?: Timestamp;
-  breakStartAt?: Timestamp;
-  breakEndAt?: Timestamp;
-  clockOutAt?: Timestamp;
-  hourlyWage?: number;
-  status: 'draft' | 'pending' | 'approved' | 'rejected';
-}
-
-interface UserInfo {
-  name: string;
-  seed?: string;
-  bgColor?: string;
-}
 
 interface UserReport {
   userId: string;
@@ -51,25 +32,11 @@ export default function ReportPage() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [timecards, setTimecards] = useState<TimecardRow[]>([]);
-  const [userInfoMap, setUserInfoMap] = useState<Record<string, UserInfo>>({});
-  const [memberTransport, setMemberTransport] = useState<Record<string, number>>({});
+  const [savedReport, setSavedReport] = useState<any>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [orgSettings, setOrgSettings] = useState<{
-    defaultHourlyWage: number;
-    nightPremiumEnabled: boolean;
-    nightPremiumRate: number;
-    nightStart: string;
-    nightEnd: string;
-    overtimePremiumEnabled: boolean;
-    overtimePremiumRate: number;
-    overtimeDailyThresholdMinutes: number;
-    holidayPremiumEnabled: boolean;
-    holidayPremiumRate: number;
-    holidayIncludesWeekend: boolean;
-    transportAllowanceEnabled: boolean;
-    transportAllowancePerShift: number;
-  } | null>(null);
+  const [userTimecards, setUserTimecards] = useState<any[]>([]);
+  const [orgSettings, setOrgSettings] = useState<any>(null);
+  const [memberTransport, setMemberTransport] = useState<number>(0);
 
   useEffect(() => {
     if (!userProfile) return;
@@ -84,110 +51,74 @@ export default function ReportPage() {
       if (!userProfile?.currentOrganizationId) return;
       setLoading(true);
       try {
-        // 組織設定
-        try {
-          const orgSnap = await getDoc(doc(db, 'organizations', userProfile.currentOrganizationId));
-          if (orgSnap.exists()) {
-            const o = orgSnap.data() as any;
-            setOrgSettings({
-              defaultHourlyWage: Number(o.defaultHourlyWage ?? 1100),
-              nightPremiumEnabled: !!o.nightPremiumEnabled,
-              nightPremiumRate: Number(o.nightPremiumRate ?? 0.25),
-              nightStart: o.nightStart ?? '22:00',
-              nightEnd: o.nightEnd ?? '05:00',
-              overtimePremiumEnabled: !!o.overtimePremiumEnabled,
-              overtimePremiumRate: Number(o.overtimePremiumRate ?? 0.25),
-              overtimeDailyThresholdMinutes: Number(o.overtimeDailyThresholdMinutes ?? 480),
-              holidayPremiumEnabled: !!o.holidayPremiumEnabled,
-              holidayPremiumRate: Number(o.holidayPremiumRate ?? 0.35),
-              holidayIncludesWeekend: o.holidayIncludesWeekend ?? true,
-              transportAllowanceEnabled: !!o.transportAllowanceEnabled,
-              transportAllowancePerShift: Number(o.transportAllowancePerShift ?? 0),
+        // 組織設定を取得
+        const orgSnap = await getDoc(doc(db, 'organizations', userProfile.currentOrganizationId));
+        if (orgSnap.exists()) {
+          const o = orgSnap.data() as any;
+          setOrgSettings({
+            defaultHourlyWage: Number(o.defaultHourlyWage ?? 1100),
+            nightPremiumEnabled: !!o.nightPremiumEnabled,
+            nightPremiumRate: Number(o.nightPremiumRate ?? 0.25),
+            nightStart: o.nightStart ?? '22:00',
+            nightEnd: o.nightEnd ?? '05:00',
+            overtimePremiumEnabled: !!o.overtimePremiumEnabled,
+            overtimePremiumRate: Number(o.overtimePremiumRate ?? 0.25),
+            overtimeDailyThresholdMinutes: Number(o.overtimeDailyThresholdMinutes ?? 480),
+            holidayPremiumEnabled: !!o.holidayPremiumEnabled,
+            holidayPremiumRate: Number(o.holidayPremiumRate ?? 0.35),
+            holidayIncludesWeekend: o.holidayIncludesWeekend ?? true,
+            transportAllowanceEnabled: !!o.transportAllowanceEnabled,
+            transportAllowancePerShift: Number(o.transportAllowancePerShift ?? 0),
+          });
+        }
+        
+        // 保存済みレポートを読み込み
+        const y = selectedMonth.getFullYear();
+        const m = selectedMonth.getMonth() + 1;
+        const monthKey = `${y}-${String(m).padStart(2, '0')}`;
+        
+        // 該当月の全ユーザーのレポートを取得
+        const q = query(
+          collection(db, 'monthlyReports'),
+          where('organizationId', '==', userProfile.currentOrganizationId),
+          where('year', '==', y),
+          where('month', '==', m)
+        );
+        const snap = await getDocs(q);
+        
+        if (snap.empty) {
+          // 保存済みレポートがない
+          setSavedReport(null);
+          setError(null);
+          setLoading(false);
+          return;
+        }
+        
+        // 保存済みレポートからデータを構築（status='confirmed'のみ）
+        const reports: UserReport[] = [];
+        snap.forEach(d => {
+          const data = d.data();
+          // 確定済み(confirmed)のレポートのみ表示、差し戻し済み(reverted)は除外
+          if (data.status === 'confirmed') {
+            reports.push({
+              userId: data.userId,
+              userName: data.userName,
+              avatarUrl: '', // アバターURLは不要なので空文字
+              workDays: data.workDays || 0,
+              totalMinutes: data.totalWorkMinutes || 0,
+              nightMinutes: data.totalNightMinutes || 0,
+              overtimeMinutes: data.totalOvertimeMinutes || 0,
+              base: data.baseWage || 0,
+              night: data.nightPremium || 0,
+              overtime: data.overtimePremium || 0,
+              holiday: data.holidayPremium || 0,
+              transport: data.transportAllowance || 0,
+              total: data.totalAmount || 0,
             });
           }
-        } catch (e) {
-          console.warn('[Report] failed to load org settings', e);
-        }
+        });
+        setSavedReport({ userReports: reports });
 
-        // メンバー個別設定（交通費）を取得
-        try {
-          const memberSettingsSnap = await getDocs(collection(db, 'organizations', userProfile.currentOrganizationId, 'members'));
-          const transportMap = new Map<string, number>();
-          memberSettingsSnap.forEach((d) => {
-            const v = (d.data() as any).transportAllowancePerShift;
-            if (typeof v === 'number') transportMap.set(d.id, v);
-          });
-          setMemberTransport(Object.fromEntries(transportMap));
-        } catch (e) {
-          console.warn('[Report] member setting load failed', e);
-        }
-
-        // 月範囲のタイムカードを取得（status=approvedのみ）
-        const y = selectedMonth.getFullYear();
-        const m = selectedMonth.getMonth();
-        const startKey = `${y}-${String(m + 1).padStart(2, '0')}-01`;
-        const endY = m === 11 ? y + 1 : y;
-        const endM = m === 11 ? 0 : m + 1;
-        const endKey = `${endY}-${String(endM + 1).padStart(2, '0')}-01`;
-
-        const qy = query(
-          collection(db, 'timecards'),
-          where('organizationId', '==', userProfile.currentOrganizationId),
-          where('dateKey', '>=', startKey),
-          where('dateKey', '<', endKey)
-        );
-        const snap = await getDocs(qy);
-
-        const infoCache = new Map<string, UserInfo>();
-        const getUserInfo = async (userId: string) => {
-          if (infoCache.has(userId)) return infoCache.get(userId)!;
-          let name = userId;
-          let seed: string | undefined;
-          let bgColor: string | undefined;
-          try {
-            const u = await getDoc(doc(db, 'users', userId));
-            if (u.exists()) {
-              const data = u.data() as any;
-              if (data.deleted) {
-                name = `(退職済み) ${data.displayName || userId}`;
-              } else {
-                name = data.displayName || userId;
-              }
-              seed = data.avatarSeed || name || userId;
-              bgColor = data.avatarBackgroundColor;
-            }
-          } catch {
-            name = `(退職済み) ${userId}`;
-          }
-          const info: UserInfo = { name, seed, bgColor };
-          infoCache.set(userId, info);
-          return info;
-        };
-
-        const rows: TimecardRow[] = [];
-        for (const d of snap.docs) {
-          const data = d.data() as any;
-          // approved（承認済み）のみを表示
-          if (data.status !== 'approved') continue;
-          
-          await getUserInfo(data.userId);
-          
-          const [year, month, day] = data.dateKey.split('-').map(Number);
-          rows.push({
-            id: d.id,
-            userId: data.userId,
-            dateKey: data.dateKey,
-            date: new Date(year, month - 1, day),
-            clockInAt: data.clockInAt,
-            breakStartAt: data.breakStartAt,
-            breakEndAt: data.breakEndAt,
-            clockOutAt: data.clockOutAt,
-            hourlyWage: data.hourlyWage,
-            status: data.status || 'approved',
-          });
-        }
-        setTimecards(rows);
-        setUserInfoMap(Object.fromEntries(Array.from(infoCache.entries()).map(([id, v]) => [id, v])));
         setError(null);
       } catch (e: any) {
         console.error('[Report] load error', e);
@@ -203,106 +134,18 @@ export default function ReportPage() {
     load();
   }, [userProfile?.currentOrganizationId, selectedMonth]);
 
-  // 計算ヘルパー
-  const minutesBetweenTimestamps = (start?: Timestamp, end?: Timestamp) => {
-    if (!start || !end) return 0;
-    return Math.max(0, Math.round((end.toMillis() - start.toMillis()) / 60000));
-  };
-  
-  const calcNightMinutes = (clockIn?: Timestamp, clockOut?: Timestamp, nightStart?: string, nightEnd?: string) => {
-    if (!clockIn || !clockOut || !nightStart || !nightEnd) return 0;
-    const start = clockIn.toDate();
-    const end = clockOut.toDate();
-    const [nsH, nsM] = nightStart.split(':').map(Number);
-    const [neH, neM] = nightEnd.split(':').map(Number);
-    let total = 0;
-    let cur = new Date(start);
-    while (cur < end) {
-      const h = cur.getHours();
-      const m = cur.getMinutes();
-      const dayMin = h * 60 + m;
-      const nsMin = nsH * 60 + nsM;
-      const neMin = neH * 60 + neM;
-      let isNight = false;
-      if (nsMin <= neMin) {
-        isNight = dayMin >= nsMin && dayMin < neMin;
-      } else {
-        isNight = dayMin >= nsMin || dayMin < neMin;
-      }
-      if (isNight) total++;
-      cur = new Date(cur.getTime() + 60000);
-    }
-    return total;
-  };
-
-  const calcBreakdown = (row: TimecardRow) => {
-    const hourly = row.hourlyWage ?? orgSettings?.defaultHourlyWage ?? 1100;
-    const grossMin = minutesBetweenTimestamps(row.clockInAt, row.clockOutAt);
-    const breakMin = minutesBetweenTimestamps(row.breakStartAt, row.breakEndAt);
-    const totalMin = Math.max(0, grossMin - breakMin);
-    const totalH = totalMin / 60;
-    const base = hourly * totalH;
-    const nightMin = orgSettings?.nightPremiumEnabled ? calcNightMinutes(row.clockInAt, row.clockOutAt, orgSettings.nightStart, orgSettings.nightEnd) : 0;
-    const night = orgSettings?.nightPremiumEnabled ? hourly * (nightMin / 60) * (orgSettings.nightPremiumRate ?? 0) : 0;
-    const overtimeMin = orgSettings?.overtimePremiumEnabled ? Math.max(0, totalMin - (orgSettings.overtimeDailyThresholdMinutes ?? 480)) : 0;
-    const overtime = orgSettings?.overtimePremiumEnabled ? hourly * (overtimeMin / 60) * (orgSettings.overtimePremiumRate ?? 0) : 0;
-    const isWeekend = (d: Date) => d.getDay() === 0 || d.getDay() === 6;
-    const isHoliday = (d: Date) => !!JapaneseHolidays.isHoliday(d);
-    const isHol = !!orgSettings?.holidayPremiumEnabled && ((orgSettings?.holidayIncludesWeekend && isWeekend(row.date)) || isHoliday(row.date));
-    const holiday = isHol ? hourly * totalH * (orgSettings?.holidayPremiumRate ?? 0) : 0;
-    const transport = orgSettings?.transportAllowanceEnabled ? (memberTransport[row.userId] ?? orgSettings.transportAllowancePerShift ?? 0) : 0;
-    const total = Math.round(base + night + overtime + holiday + transport);
-    return { base, night, overtime, holiday, transport, total, totalMin, nightMin, overtimeMin, breakMin };
-  };
-
   // ユーザー別集計
   const userReports = useMemo(() => {
-    const map = new Map<string, UserReport>();
-    
-    for (const tc of timecards) {
-      if (!map.has(tc.userId)) {
-        const info = userInfoMap[tc.userId] || { name: tc.userId };
-        const seed = info.seed || info.name || tc.userId;
-        const bgColor = info.bgColor;
-        const avatarUrl = `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(seed)}${bgColor ? `&backgroundColor=${encodeURIComponent(bgColor)}` : '&backgroundType=gradientLinear'}&radius=50&fontWeight=700`;
-        
-        map.set(tc.userId, {
-          userId: tc.userId,
-          userName: info.name,
-          avatarUrl,
-          workDays: 0,
-          totalMinutes: 0,
-          nightMinutes: 0,
-          overtimeMinutes: 0,
-          base: 0,
-          night: 0,
-          overtime: 0,
-          holiday: 0,
-          transport: 0,
-          total: 0,
-        });
-      }
-      
-      const report = map.get(tc.userId)!;
-      const uniqueDays = new Set(timecards.filter(t => t.userId === tc.userId).map(t => t.dateKey));
-      report.workDays = uniqueDays.size;
-      
-      const bd = calcBreakdown(tc);
-      report.totalMinutes += bd.totalMin;
-      report.nightMinutes += bd.nightMin;
-      report.overtimeMinutes += bd.overtimeMin;
-      report.base += bd.base;
-      report.night += bd.night;
-      report.overtime += bd.overtime;
-      report.holiday += bd.holiday;
-      report.transport += bd.transport;
-      report.total += bd.total;
+    // 保存済みレポートがあればそれを使用
+    if (savedReport && savedReport.userReports) {
+      return (savedReport.userReports as UserReport[]).sort((a, b) => a.userName.localeCompare(b.userName));
     }
     
-    return Array.from(map.values()).sort((a, b) => a.userName.localeCompare(b.userName));
-  }, [timecards, orgSettings, memberTransport, userInfoMap]);
+    return [];
+  }, [savedReport]);
 
   const summary = useMemo(() => {
+    // userReportsから集計
     let totalStaff = userReports.length;
     let totalDays = 0;
     let totalMin = 0;
@@ -359,8 +202,41 @@ export default function ReportPage() {
   const prevMonth = () => setSelectedMonth(new Date(selectedMonth.getFullYear(), selectedMonth.getMonth()-1, 1));
   const nextMonth = () => setSelectedMonth(new Date(selectedMonth.getFullYear(), selectedMonth.getMonth()+1, 1));
 
-  const selectedUser = selectedUserId ? userReports.find(r => r.userId === selectedUserId) : null;
-  const selectedTimecards = selectedUserId ? timecards.filter(tc => tc.userId === selectedUserId) : [];
+  // ユーザー詳細を表示（タイムカード一覧を取得）
+  const showUserDetail = async (userId: string) => {
+    if (!userProfile?.currentOrganizationId) return;
+    
+    try {
+      const y = selectedMonth.getFullYear();
+      const m = selectedMonth.getMonth();
+      const startKey = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+      const endY = m === 11 ? y + 1 : y;
+      const endM = m === 11 ? 0 : m + 1;
+      const endKey = `${endY}-${String(endM + 1).padStart(2, '0')}-01`;
+
+      // 該当月の承認済みタイムカードを取得（参照用）
+      const q = query(
+        collection(db, 'timecards'),
+        where('organizationId', '==', userProfile.currentOrganizationId),
+        where('userId', '==', userId),
+        where('status', '==', 'approved'),
+        where('dateKey', '>=', startKey),
+        where('dateKey', '<', endKey)
+      );
+      const snap = await getDocs(q);
+      
+      const cards = snap.docs.map(d => ({
+        id: d.id,
+        ...d.data()
+      })).sort((a: any, b: any) => a.dateKey.localeCompare(b.dateKey));
+      
+      setUserTimecards(cards);
+      setSelectedUserId(userId);
+    } catch (e) {
+      console.error('[Report] Failed to load user timecards', e);
+      alert('タイムカードの読み込みに失敗しました');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -390,8 +266,16 @@ export default function ReportPage() {
             <div className="font-semibold">{selectedMonth.getFullYear()}年 {selectedMonth.getMonth()+1}月</div>
             <button onClick={nextMonth} className="px-2 py-1 border rounded">→</button>
           </div>
+          {savedReport && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-green-100 text-green-800 rounded">
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              <span className="text-sm font-medium">承認済み</span>
+            </div>
+          )}
           <div className="ml-auto">
-            <button onClick={exportCsv} className="px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">CSV出力</button>
+            <button onClick={exportCsv} disabled={userReports.length === 0} className={`px-3 py-1 rounded ${userReports.length === 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>CSV出力</button>
           </div>
         </div>
 
@@ -428,88 +312,7 @@ export default function ReportPage() {
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
             <p className="text-gray-600">読み込み中...</p>
           </div>
-        ) : selectedUser ? (
-          // 詳細表示
-          <div>
-            <div className="mb-4">
-              <button onClick={() => setSelectedUserId(null)} className="text-sm text-blue-600 hover:text-blue-800">← 一覧に戻る</button>
-            </div>
-            <div className="bg-white rounded-lg shadow p-6 mb-6">
-              <div className="flex items-center gap-4 mb-4">
-                <img src={selectedUser.avatarUrl} alt={selectedUser.userName} className="w-16 h-16 rounded-full" />
-                <div>
-                  <h2 className="text-xl font-bold">{selectedUser.userName}</h2>
-                  <p className="text-sm text-gray-600">出勤日数: {selectedUser.workDays}日 / 総労働時間: {(selectedUser.totalMinutes/60).toFixed(1)}時間</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                <div>
-                  <p className="text-xs text-gray-600">基本給</p>
-                  <p className="text-lg font-semibold">¥{Math.round(selectedUser.base).toLocaleString('ja-JP')}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600">深夜手当</p>
-                  <p className="text-lg font-semibold">¥{Math.round(selectedUser.night).toLocaleString('ja-JP')}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600">残業手当</p>
-                  <p className="text-lg font-semibold">¥{Math.round(selectedUser.overtime).toLocaleString('ja-JP')}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600">休日手当</p>
-                  <p className="text-lg font-semibold">¥{Math.round(selectedUser.holiday).toLocaleString('ja-JP')}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600">交通費</p>
-                  <p className="text-lg font-semibold">¥{Math.round(selectedUser.transport).toLocaleString('ja-JP')}</p>
-                </div>
-              </div>
-              <div className="mt-4 pt-4 border-t">
-                <p className="text-sm text-gray-600">総支給額</p>
-                <p className="text-3xl font-bold text-blue-600">¥{Math.round(selectedUser.total).toLocaleString('ja-JP')}</p>
-              </div>
-            </div>
-            <div className="bg-white rounded-lg shadow overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="p-2 border-b text-center">日付</th>
-                    <th className="p-2 border-b text-center">出勤</th>
-                    <th className="p-2 border-b text-center">退勤</th>
-                    <th className="p-2 border-b text-center">休憩(分)</th>
-                    <th className="p-2 border-b text-center">労働(分)</th>
-                    <th className="p-2 border-b text-center">深夜(分)</th>
-                    <th className="p-2 border-b text-center">残業(分)</th>
-                    <th className="p-2 border-b text-center">給与(円)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedTimecards.length === 0 ? (
-                    <tr><td className="p-4 text-center" colSpan={8}>データがありません</td></tr>
-                  ) : (
-                    selectedTimecards.map(tc => {
-                      const bd = calcBreakdown(tc);
-                      const fmt = (ts?: Timestamp) => ts ? ts.toDate().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'}) : '--:--';
-                      return (
-                        <tr key={tc.id} className="hover:bg-gray-50">
-                          <td className="p-2 border-b text-center">{tc.dateKey}</td>
-                          <td className="p-2 border-b text-center">{fmt(tc.clockInAt)}</td>
-                          <td className="p-2 border-b text-center">{fmt(tc.clockOutAt)}</td>
-                          <td className="p-2 border-b text-center">{bd.breakMin}</td>
-                          <td className="p-2 border-b text-center">{bd.totalMin}</td>
-                          <td className="p-2 border-b text-center">{bd.nightMin}</td>
-                          <td className="p-2 border-b text-center">{bd.overtimeMin}</td>
-                          <td className="p-2 border-b text-center">¥{bd.total.toLocaleString('ja-JP')}</td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
         ) : (
-          // 一覧表示
           <div className="bg-white rounded-lg shadow overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
@@ -525,18 +328,19 @@ export default function ReportPage() {
                   <th className="p-3 border-b text-center">休日</th>
                   <th className="p-3 border-b text-center">交通費</th>
                   <th className="p-3 border-b text-center">総支給額</th>
-                  <th className="p-3 border-b text-center">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {userReports.length === 0 ? (
-                  <tr><td className="p-8 text-center text-gray-500" colSpan={12}>該当月の承認済みタイムカードがありません</td></tr>
+                  <tr><td className="p-8 text-center text-gray-500" colSpan={11}>{savedReport === null ? 'この月のレポートはまだ作成されていません。給与明細ページで承認を行うとレポートが作成されます。' : '該当月の承認済みタイムカードがありません'}</td></tr>
                 ) : (
                   userReports.map(r => (
-                    <tr key={r.userId} className="hover:bg-gray-50">
+                    <tr key={r.userId} className="hover:bg-gray-50 cursor-pointer" onClick={() => showUserDetail(r.userId)}>
                       <td className="p-3 border-b">
                         <div className="flex items-center gap-2">
-                          <img src={r.avatarUrl} alt={r.userName} className="w-8 h-8 rounded-full" />
+                          <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-white text-xs font-semibold">
+                            {r.userName.charAt(0)}
+                          </div>
                           <span className="font-medium">{r.userName}</span>
                         </div>
                       </td>
@@ -550,9 +354,6 @@ export default function ReportPage() {
                       <td className="p-3 border-b text-center">¥{Math.round(r.holiday).toLocaleString('ja-JP')}</td>
                       <td className="p-3 border-b text-center">¥{Math.round(r.transport).toLocaleString('ja-JP')}</td>
                       <td className="p-3 border-b text-center font-semibold text-blue-600">¥{Math.round(r.total).toLocaleString('ja-JP')}</td>
-                      <td className="p-3 border-b text-center">
-                        <button onClick={() => setSelectedUserId(r.userId)} className="px-3 py-1 text-xs rounded bg-gray-600 text-white hover:bg-gray-700">詳細</button>
-                      </td>
                     </tr>
                   ))
                 )}
@@ -562,10 +363,127 @@ export default function ReportPage() {
         )}
 
         <div className="mt-4 text-sm text-gray-600 space-y-1">
-          <p>※ 承認済みのタイムカードのみを集計しています</p>
-          <p>※ 詳細ボタンで個別の勤怠履歴を確認できます</p>
+          {savedReport ? (
+            <>
+              <p>※ このレポートは承認済みです。給与明細ページで追加承認を行うと自動的に更新されます。</p>
+            </>
+          ) : (
+            <>
+              <p>※ この月のレポートはまだ作成されていません</p>
+              <p>※ 給与明細ページでタイムカードを承認すると、レポートが自動的に作成されます</p>
+            </>
+          )}
         </div>
       </div>
+
+      {/* ユーザー詳細モーダル */}
+      {selectedUserId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedUserId(null)}>
+          <div className="bg-white rounded-lg shadow-2xl max-w-6xl w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div>
+                  <h2 className="text-xl font-bold">{userReports.find(r => r.userId === selectedUserId)?.userName}の勤怠詳細</h2>
+                  <p className="text-sm text-gray-600">{selectedMonth.getFullYear()}年{selectedMonth.getMonth() + 1}月</p>
+                </div>
+              </div>
+              <button onClick={() => setSelectedUserId(null)} className="text-gray-400 hover:text-gray-600">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <div className="p-6">
+              {/* 月次レポートサマリー */}
+              {(() => {
+                const userReport = userReports.find(r => r.userId === selectedUserId);
+                if (!userReport) return null;
+                
+                return (
+                  <div className="mb-6 bg-blue-50 rounded-lg p-4">
+                    <h3 className="font-semibold mb-3 text-blue-900">月次確定レポート</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <p className="text-gray-600">出勤日数</p>
+                        <p className="font-semibold text-lg">{userReport.workDays}日</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">基本給</p>
+                        <p className="font-semibold text-lg">¥{Math.round(userReport.base).toLocaleString('ja-JP')}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">深夜手当</p>
+                        <p className="font-semibold text-lg">¥{Math.round(userReport.night).toLocaleString('ja-JP')}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">残業手当</p>
+                        <p className="font-semibold text-lg">¥{Math.round(userReport.overtime).toLocaleString('ja-JP')}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">休日手当</p>
+                        <p className="font-semibold text-lg">¥{Math.round(userReport.holiday).toLocaleString('ja-JP')}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">交通費</p>
+                        <p className="font-semibold text-lg">¥{Math.round(userReport.transport).toLocaleString('ja-JP')}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-gray-600">総支給額</p>
+                        <p className="font-semibold text-2xl text-emerald-600">¥{Math.round(userReport.total).toLocaleString('ja-JP')}</p>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-3">※ この金額は承認時点で確定した値です</p>
+                  </div>
+                );
+              })()}
+              
+              {/* タイムカード詳細（参考情報） */}
+              <h3 className="font-semibold mb-2 text-gray-700">タイムカード明細（参考）</h3>
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="p-2 border-b text-center">日付</th>
+                    <th className="p-2 border-b text-center">出勤</th>
+                    <th className="p-2 border-b text-center">退勤</th>
+                    <th className="p-2 border-b text-center">休憩(分)</th>
+                    <th className="p-2 border-b text-center">勤務(分)</th>
+                    <th className="p-2 border-b text-center">時給</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {userTimecards.length === 0 ? (
+                    <tr><td className="p-4 text-center text-gray-500" colSpan={6}>タイムカードがありません</td></tr>
+                  ) : (
+                    userTimecards.map((tc: any) => {
+                      const fmt = (ts?: Timestamp) => ts ? ts.toDate().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '--:--';
+                      const workMinutes = tc.clockInAt && tc.clockOutAt 
+                        ? Math.max(0, Math.floor((tc.clockOutAt.toMillis() - tc.clockInAt.toMillis()) / 60000))
+                        : 0;
+                      const breakMinutes = tc.breakStartAt && tc.breakEndAt
+                        ? Math.max(0, Math.floor((tc.breakEndAt.toMillis() - tc.breakStartAt.toMillis()) / 60000))
+                        : 0;
+                      const netMinutes = workMinutes - breakMinutes;
+                      
+                      return (
+                        <tr key={tc.id} className="hover:bg-gray-50">
+                          <td className="p-2 border-b text-center">{tc.dateKey}</td>
+                          <td className="p-2 border-b text-center">{fmt(tc.clockInAt)}</td>
+                          <td className="p-2 border-b text-center">{fmt(tc.clockOutAt)}</td>
+                          <td className="p-2 border-b text-center">{breakMinutes}分</td>
+                          <td className="p-2 border-b text-center">{netMinutes}分</td>
+                          <td className="p-2 border-b text-center">¥{(tc.hourlyWage || 0).toLocaleString()}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+              <p className="text-xs text-gray-500 mt-2">※ 給与計算は monthlyReports の確定値を使用しています</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

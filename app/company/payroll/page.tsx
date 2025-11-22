@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { collection, doc, getDoc, getDocs, orderBy, query, where, Timestamp, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, orderBy, query, where, Timestamp, updateDoc, setDoc } from 'firebase/firestore';
 import JapaneseHolidays from 'japanese-holidays';
 import { db } from '@/lib/firebase';
 
@@ -56,6 +56,7 @@ export default function PayrollPage() {
   const [timecards, setTimecards] = useState<TimecardRow[]>([]);
   const [userInfoMap, setUserInfoMap] = useState<Record<string, UserInfo>>({});
   const [memberTransport, setMemberTransport] = useState<Record<string, number>>({});
+  const [monthlyReports, setMonthlyReports] = useState<Record<string, any>>({}); // userId -> report data
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{
@@ -197,6 +198,23 @@ export default function PayrollPage() {
         setTimecards(rows);
         // userInfoMapをセット
         setUserInfoMap(Object.fromEntries(Array.from(infoCache.entries()).map(([id, v]) => [id, v])));
+        
+        // 月次レポートの状態を取得（承認済みユーザーを確認）
+        const reportMap: Record<string, any> = {};
+        const uniqueUserIds = Array.from(new Set(rows.map(r => r.userId)));
+        for (const userId of uniqueUserIds) {
+          const reportId = `${userProfile.currentOrganizationId}_${y}-${String(m + 1).padStart(2, '0')}_${userId}`;
+          try {
+            const reportSnap = await getDoc(doc(db, 'monthlyReports', reportId));
+            if (reportSnap.exists()) {
+              reportMap[userId] = reportSnap.data();
+            }
+          } catch (e) {
+            console.warn(`[Payroll] Failed to load report for user ${userId}`, e);
+          }
+        }
+        setMonthlyReports(reportMap);
+        
         setError(null);
       } catch (e: any) {
         console.error('[Payroll] load error', e);
@@ -337,6 +355,7 @@ export default function PayrollPage() {
   }, [timecards, orgSettings, memberTransport, userInfoMap]);
 
   // 承認処理
+  // 承認処理
   const handleApprove = async (userId: string) => {
     if (!confirm('この申請を承認しますか？')) return;
     try {
@@ -363,11 +382,77 @@ export default function PayrollPage() {
         await updateDoc(doc(db, 'timecards', tc.id), updates);
       }
       
+      // monthlyReportsに保存/更新（承認後のデータを使用するため、ユーザー情報を渡す）
+      await saveMonthlyReport(userId);
+      
       alert('承認が完了しました');
       window.location.reload();
     } catch (e) {
       console.error('[Payroll] approve error', e);
       alert('承認に失敗しました');
+    }
+  };
+
+  // 月次レポート保存
+  const saveMonthlyReport = async (userId: string) => {
+    if (!userProfile?.currentOrganizationId) return;
+    
+    const y = selectedMonth.getFullYear();
+    const m = selectedMonth.getMonth() + 1;
+    const reportId = `${userProfile.currentOrganizationId}_${y}-${String(m).padStart(2, '0')}_${userId}`;
+    
+    // ユーザー情報取得（承認前の計算結果を使用）
+    const userApp = applications.find((app: any) => app.userId === userId);
+    if (!userApp) {
+      console.error('[Payroll] User application not found for userId:', userId);
+      return;
+    }
+    
+    // 承認済みタイムカードが0件でもレポートを作成（今回承認したものが含まれるはず）
+    console.log('[Payroll] Saving monthly report for user:', userId, 'reportId:', reportId);
+    
+    // 既存のレポートを確認（バージョン管理のため）
+    const existingReportSnap = await getDoc(doc(db, 'monthlyReports', reportId));
+    const existingData = existingReportSnap.exists() ? existingReportSnap.data() : null;
+    const currentVersion = existingData?.version || 0;
+    const newVersion = currentVersion + 1;
+    
+    // レポートデータを作成
+    try {
+      const now = Timestamp.now();
+      await setDoc(doc(db, 'monthlyReports', reportId), {
+        organizationId: userProfile.currentOrganizationId,
+        userId: userId,
+        userName: userApp.userName,
+        year: y,
+        month: m,
+        // 集計データ
+        workDays: userApp.workDays,
+        totalWorkMinutes: userApp.totalMinutes,
+        totalBreakMinutes: userApp.breakMinutes,
+        totalNightMinutes: userApp.nightMinutes,
+        totalOvertimeMinutes: userApp.overtimeMinutes,
+        baseWage: userApp.base,
+        nightPremium: userApp.night,
+        overtimePremium: userApp.overtime,
+        holidayPremium: userApp.holiday,
+        transportAllowance: userApp.transport,
+        totalAmount: userApp.total,
+        timecardCount: userApp.timecards.length,
+        // レポート状態
+        status: 'confirmed',
+        version: newVersion,
+        // 承認情報
+        approvedAt: now,
+        approvedBy: userProfile.uid,
+        // タイムスタンプ
+        createdAt: existingData?.createdAt || now,
+        updatedAt: now,
+      });
+      console.log('[Payroll] Monthly report saved successfully, version:', newVersion);
+    } catch (err) {
+      console.error('[Payroll] Error saving monthly report:', err);
+      throw err;
     }
   };
 
@@ -389,6 +474,47 @@ export default function PayrollPage() {
     } catch (e) {
       console.error('[Payroll] reject error', e);
       alert('却下に失敗しました');
+    }
+  };
+
+  // 月次レポート差し戻し処理
+  const handleRevertReport = async (userId: string) => {
+    if (!userProfile?.currentOrganizationId) return;
+    
+    const reason = prompt('差し戻し理由を入力してください（任意）', '');
+    if (reason === null) return; // キャンセル時は何もしない
+    
+    const y = selectedMonth.getFullYear();
+    const m = selectedMonth.getMonth() + 1;
+    const reportId = `${userProfile.currentOrganizationId}_${y}-${String(m).padStart(2, '0')}_${userId}`;
+    
+    try {
+      // 1. 月次レポートを差し戻し済みに更新
+      await updateDoc(doc(db, 'monthlyReports', reportId), {
+        status: 'reverted',
+        revertedAt: Timestamp.now(),
+        revertedBy: userProfile.uid,
+        revertReason: reason || '',
+        updatedAt: Timestamp.now(),
+      });
+      
+      // 2. 該当月の全タイムカードを approved → pending に戻す
+      const userTimecards = timecards.filter(
+        tc => tc.userId === userId && tc.status === 'approved'
+      );
+      
+      for (const tc of userTimecards) {
+        await updateDoc(doc(db, 'timecards', tc.id), {
+          status: 'pending',
+          updatedAt: Timestamp.now(),
+        });
+      }
+      
+      alert(`差し戻しが完了しました（${userTimecards.length}件のタイムカードを未承認に戻しました）`);
+      window.location.reload();
+    } catch (e) {
+      console.error('[Payroll] revert error', e);
+      alert('差し戻しに失敗しました');
     }
   };
 
@@ -529,18 +655,30 @@ export default function PayrollPage() {
                         >
                           詳細
                         </button>
-                        <button 
-                          onClick={() => handleApprove(app.userId)} 
-                          className="px-3 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700"
-                        >
-                          承認
-                        </button>
-                        <button 
-                          onClick={() => handleReject(app.userId)} 
-                          className="px-3 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700"
-                        >
-                          却下
-                        </button>
+                        {monthlyReports[app.userId]?.status === 'confirmed' ? (
+                          <button 
+                            onClick={() => handleRevertReport(app.userId)} 
+                            className="px-3 py-1 text-xs rounded bg-amber-600 text-white hover:bg-amber-700"
+                            title="承認済みのレポートを差し戻します"
+                          >
+                            差し戻し
+                          </button>
+                        ) : (
+                          <>
+                            <button 
+                              onClick={() => handleApprove(app.userId)} 
+                              className="px-3 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                            >
+                              承認
+                            </button>
+                            <button 
+                              onClick={() => handleReject(app.userId)} 
+                              className="px-3 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700"
+                            >
+                              却下
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>

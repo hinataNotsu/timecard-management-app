@@ -19,6 +19,7 @@ interface TimecardRow {
   breakTime: number; // minutes
   hourlyWage: number;
   status: 'in_progress' | 'completed';
+  approvalStatus?: 'draft' | 'pending' | 'approved' | 'rejected'; // 承認ステータス
   totalHours?: number;
   totalPay?: number;
   isEditing?: boolean;
@@ -90,6 +91,7 @@ export default function TimecardsPage() {
             breakTime: breakMinutes,
             hourlyWage: Number(r.hourlyWage ?? 0),
             status,
+            approvalStatus: r.status || 'draft', // Firestoreのstatusフィールド
           };
         });
 
@@ -378,7 +380,11 @@ export default function TimecardsPage() {
                     </td>
                     <td className="p-3 border-b text-center">
                       <div className="flex gap-1 justify-center">
-                        {tc.isEditing ? (
+                        {tc.approvalStatus === 'approved' ? (
+                          <span className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-500">
+                            承認済（編集不可）
+                          </span>
+                        ) : tc.isEditing ? (
                           <>
                             <button
                               onClick={() => saveTimecard(tc.id)}
