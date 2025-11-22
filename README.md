@@ -11,19 +11,19 @@ Next.js + Firebase で構築された、アルバイトスタッフ向けのシ�
 - **アルバイトスタッフ**: シフト提出、タイムカード打刻、給与確認
 
 ### 🔑 企業管理者機能
-- スタッフの追加・削除・権限管理 ([app/organization/members/page.tsx](app/organization/members/page.tsx))
-- 組織加入申請の承認・却下 ([app/organization/requests/page.tsx](app/organization/requests/page.tsx))
-- シフト申請の承認・却下 ([app/shifts/list/page.tsx](app/shifts/list/page.tsx))
-- タイムカードの承認・給与計算 ([app/payroll/page.tsx](app/payroll/page.tsx))
-- 月次レポート・CSV出力 ([app/report/page.tsx](app/report/page.tsx))
-- 組織設定（時給・深夜手当・残業手当・交通費等） ([app/organization/settings/page.tsx](app/organization/settings/page.tsx))
+- スタッフの追加・削除・権限管理 ([app/company/members/page.tsx](app/company/members/page.tsx))
+- 組織加入申請の承認・却下 ([app/company/members/page.tsx](app/company/members/page.tsx))
+- シフト申請の承認・却下 ([app/company/shifts/page.tsx](app/company/shifts/page.tsx))
+- タイムカードの承認・給与計算 ([app/company/payroll/page.tsx](app/company/payroll/page.tsx))
+- 月次レポート・CSV出力 ([app/company/report/page.tsx](app/company/report/page.tsx))
+- 組織設定（時給・深夜手当・残業手当・交通費等） ([app/company/settings/page.tsx](app/company/settings/page.tsx))
 
 ### 👤 アルバイトスタッフ機能
-- 組織への加入申請 ([app/join-organization/page.tsx](app/join-organization/page.tsx), [app/add-organization/page.tsx](app/add-organization/page.tsx))
-- シフト提出（月/週/日ビュー対応） ([app/shifts/submit/page.tsx](app/shifts/submit/page.tsx))
-- タイムカード打刻（出勤/休憩/退勤） ([app/dashboard/part-time/timecard/page.tsx](app/dashboard/part-time/timecard/page.tsx))
-- 承認済みシフト確認 ([app/shifts/my/page.tsx](app/shifts/my/page.tsx))
-- 給与明細確認 ([app/dashboard/part-time/payroll/page.tsx](app/dashboard/part-time/payroll/page.tsx))
+- 組織への加入申請 ([app/onboarding/join-organization/page.tsx](app/onboarding/join-organization/page.tsx), [app/onboarding/add-organization/page.tsx](app/onboarding/add-organization/page.tsx))
+- シフト提出（月/週/日ビュー対応） ([app/staff/shifts/submit/page.tsx](app/staff/shifts/submit/page.tsx))
+- タイムカード打刻（出勤/休憩/退勤） ([app/staff/timecard/page.tsx](app/staff/timecard/page.tsx))
+- 承認済みシフト確認 ([app/staff/shifts/my/page.tsx](app/staff/shifts/my/page.tsx))
+- 給与明細確認 ([app/staff/payroll/page.tsx](app/staff/payroll/page.tsx))
 
 ### 💰 給与計算機能
 - 基本給 = 時給 × 労働時間
@@ -46,50 +46,51 @@ Next.js + Firebase で構築された、アルバイトスタッフ向けのシ�
 ```
 timecard-management-app/
 ├── app/                          # Next.js App Router
-│   ├── api/                      # API Routes
-│   │   └── admin/                # 管理者専用API
-│   │       ├── create-user/      # ユーザー作成
-│   │       └── delete-user/      # ユーザー削除
-│   ├── dashboard/
-│   │   ├── company/              # 企業ダッシュボード
-│   │   └── part-time/            # アルバイトダッシュボード
-│   │       ├── timecard/         # タイムカード打刻
-│   │       └── payroll/          # 給与明細
-│   ├── shifts/                   # シフト関連
-│   │   ├── submit/               # シフト提出
-│   │   ├── list/                 # シフト一覧（管理者）
-│   │   ├── my/                   # 自分のシフト
-│   │   └── schedule/             # 承認済みシフト
-│   ├── organization/             # 組織管理
-│   │   ├── members/              # メンバー管理
-│   │   ├── staff/                # スタッフ一覧
+│   ├── company/                  # 企業管理者向け画面
+│   │   ├── dashboard/            # 企業ダッシュボード
+│   │   ├── members/              # メンバー管理・加入申請
+│   │   ├── shifts/               # シフト一覧・承認
+│   │   ├── payroll/              # 給与管理・タイムカード承認
+│   │   ├── report/               # 月次レポート・CSV出力
+│   │   ├── timecards/            # タイムカード一覧
+│   │   │   ├── page.tsx          # タイムカード一覧ページ
+│   │   │   ├── users/            # ユーザー一覧
+│   │   │   └── [userId]/         # ユーザー別タイムカード
 │   │   ├── settings/             # 組織設定
-│   │   └── requests/             # 加入申請一覧
-│   ├── add-organization/         # 組織追加申請
-│   ├── join-organization/        # 組織加入申請
-│   ├── payroll/                  # 給与管理
-│   ├── report/                   # レポート
-│   ├── timecards/                # タイムカード一覧
-│   ├── profile/                  # プロフィール
-│   ├── profile-setup/            # 初回プロフィール設定
-│   ├── login/                    # ログイン
-│   │   ├── company/              # 企業ログイン
-│   │   └── part-time/            # アルバイトログイン
-│   └── signup/                   # 新規登録
-│       ├── company/              # 企業登録
-│       └── part-time/            # アルバイト登録
+│   │   └── timecard-management/  # タイムカード管理
+│   ├── staff/                    # アルバイトスタッフ向け画面
+│   │   ├── dashboard/            # スタッフダッシュボード
+│   │   ├── timecard/             # タイムカード打刻
+│   │   ├── payroll/              # 給与明細
+│   │   ├── profile/              # プロフィール
+│   │   └── shifts/               # シフト関連
+│   │       ├── submit/           # シフト提出
+│   │       ├── my/               # 自分のシフト
+│   │       └── schedule/         # 承認済みシフト（組織全体）
+│   ├── onboarding/               # 初回設定
+│   │   ├── join-organization/    # 組織加入申請
+│   │   ├── add-organization/     # 組織追加申請
+│   │   └── profile-setup/        # 初回プロフィール設定
+│   ├── auth/                     # 認証関連
+│   │   ├── login/                # ログイン
+│   │   │   ├── company/          # 企業ログイン
+│   │   │   └── part-time/        # アルバイトログイン
+│   │   └── signup/               # 新規登録
+│   │       ├── company/          # 企業登録
+│   │       └── part-time/        # アルバイト登録
+│   ├── globals.css               # グローバルスタイル
+│   ├── layout.tsx                # ルートレイアウト
+│   └── page.tsx                  # ホームページ
 ├── components/                   # 共通コンポーネント
 │   └── OrganizationSelector.tsx  # 組織選択
 ├── contexts/                     # React Context
 │   └── AuthContext.tsx           # 認証コンテキスト
 ├── lib/
-│   ├── firebase.ts               # Firebase初期化
-│   └── firebase-admin.ts         # Firebase Admin SDK
+│   └── firebase.ts               # Firebase初期化
 ├── types/                        # TypeScript型定義
-│   └── index.ts                  # 共通型定義
-├── scripts/                      # ユーティリティスクリプト
-│   ├── migrate-timecards.ts      # タイムカード移行
-│   └── sync-hourly-wage.cjs      # 時給同期
+│   ├── index.ts                  # 共通型定義
+│   └── japanese-holidays.d.ts    # 祝日ライブラリ型定義
+├── public/                       # 静的ファイル
 ├── firestore.rules               # Firestoreセキュリティルール
 └── firestore.indexes.json        # Firestoreインデックス
 ```
@@ -137,15 +138,7 @@ firebase deploy --only firestore:rules
 firebase deploy --only firestore:indexes
 ```
 
-### 6. 環境変数の設定（Admin SDK用）
-`.env.local` を作成:
-```env
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_CLIENT_EMAIL=your-service-account-email
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-```
-
-### 7. 開発サーバーの起動
+### 6. 開発サーバーの起動
 ```bash
 npm run dev
 ```
@@ -254,12 +247,22 @@ interface Timecard {
 
 ### アルバイトスタッフ
 1. [アルバイト登録](app/signup/part-time/page.tsx) → [ログイン](app/login/part-time/page.tsx)
-2. [プロフィール設定](app/profile-setup/page.tsx) で基本情報入力
-3. [企業ID入力](app/join-organization/page.tsx) で組織に加入申請（管理者の承認待ち）
-4. 承認後、[ダッシュボード](app/dashboard/part-time/page.tsx) で今月の見込み給与確認
-5. [シフト提出](app/shifts/submit/page.tsx) でシフト登録
-6. [タイムカード](app/dashboard/part-time/timecard/page.tsx) で出退勤打刻
-7. [給与明細](app/dashboard/part-time/payroll/page.tsx) で確定給与確認
+### 企業管理者
+1. [企業登録](app/auth/signup/company/page.tsx) → [企業ログイン](app/auth/login/company/page.tsx)
+2. [ダッシュボード](app/company/dashboard/page.tsx) でスタッフ数・統計確認、企業IDコピー
+3. [メンバー管理](app/company/members/page.tsx) でスタッフの加入申請を承認/削除
+4. [シフト一覧](app/company/shifts/page.tsx) でシフト承認
+5. [給与管理](app/company/payroll/page.tsx) でタイムカード承認
+6. [レポート](app/company/report/page.tsx) で月次集計・CSV出力
+
+### アルバイトスタッフ
+1. [アルバイト登録](app/auth/signup/part-time/page.tsx) → [ログイン](app/auth/login/part-time/page.tsx)
+2. [プロフィール設定](app/onboarding/profile-setup/page.tsx) で基本情報入力
+3. [企業ID入力](app/onboarding/join-organization/page.tsx) で組織に加入申請（管理者の承認待ち）
+4. 承認後、[ダッシュボード](app/staff/dashboard/page.tsx) で今月の見込み給与確認
+5. [シフト提出](app/staff/shifts/submit/page.tsx) でシフト登録
+6. [タイムカード](app/staff/timecard/page.tsx) で出退勤打刻
+7. [給与明細](app/staff/payroll/page.tsx) で確定給与確認
 
 ## 組織加入申請フロー
 
@@ -270,7 +273,7 @@ interface Timecard {
    - `{uid, displayName, email, createdAt}` を含む
 
 2. **承認**: 企業管理者が申請を確認
-   - [申請一覧画面](app/organization/requests/page.tsx) で確認
+   - [メンバー管理画面](app/company/members/page.tsx) の「申請一覧」タブで確認
    - 承認 → `users/{uid}/organizationIds[]` に組織IDを追加
    - 削除 → `permissionList` から削除
 
@@ -281,25 +284,16 @@ interface Timecard {
 [firestore.rules](firestore.rules) では以下のセキュリティ制御を実装：
 
 - **ユーザー読み取り**: 自分自身 or 同じ組織のメンバー
-- **ユーザー更新**: 自分自身 or 管理者による組織メンバー追加/削除
+- **ユーザー更新**: 自分自身のみ（組織からの削除は`organizationIds`から組織IDを削除）
 - **組織の permissionList**: 認証済みユーザーは読み書き可能
 - **シフト/タイムカード**: 所属組織内のデータのみアクセス可能
 - **管理者権限**: `isManage: true` のユーザーは組織内データを管理可能
-
-## ユーティリティスクリプト
-
-### タイムカードの時給同期
-組織・メンバー設定に基づいて時給を一括更新:
-```bash
-node scripts/sync-hourly-wage.cjs --org <ORG_ID> --month 2025-01 --mode all --yes
-```
 
 ## デプロイ
 
 ### Vercel へのデプロイ
 1. [Vercel](https://vercel.com/) にリポジトリを接続
-2. 環境変数を設定（Admin SDK用）
-3. デプロイ実行
+2. デプロイ実行
 
 ### Firebase Hosting へのデプロイ
 ```bash
@@ -314,8 +308,8 @@ firebase deploy
 ## 開発者向けメモ
 
 - シフト・タイムカードは [`organizationId` + `userRef` + `date`](firestore.indexes.json) のインデックスが必要
-- 削除済みユーザーは [`deleted: true`](types/index.ts) フラグで論理削除
-- 深夜時間帯は [`calcNightMinutes`](app/report/page.tsx) で計算
+- ユーザー削除は組織の`organizationIds`配列から組織IDを削除する形式
+- 深夜時間帯は `calcNightMinutes` で計算
 - CSV出力は UTF-8 BOM 付き（Excel対応）
 - 組織加入は承認制（`permissionList[]` → 承認 → `organizationIds[]`）
 - ダイアログの背景透過は `bg-black/30` を使用（30%透過）
