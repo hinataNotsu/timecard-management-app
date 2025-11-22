@@ -95,8 +95,11 @@ export default function TimecardPage() {
         const incomplete = docs.find(d => !d.clockOutAt);
         if (incomplete) {
           setRecord(incomplete);
+        } else if (docs.length > 0 && docs.length < 5) {
+          // 完了済みが5件未満なら新規作成可能な状態（レコードなし）
+          setRecord(null);
         } else if (docs.length > 0) {
-          // 全て完了している場合は最新のものを表示（createdAtでソート）
+          // 5件以上ある場合は最新のものを表示（createdAtでソート）
           const sorted = docs.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
           setRecord(sorted[0]);
         }
@@ -120,6 +123,18 @@ export default function TimecardPage() {
       return record; // 未完了のタイムカードがあればそれを使う
     }
     if (!userProfile?.uid || !userProfile.currentOrganizationId) throw new Error('missing user/org');
+    // 今日のタイムカード件数をチェック（5件制限）
+    const qy = query(
+      collection(db, 'timecards'),
+      where('organizationId', '==', userProfile.currentOrganizationId),
+      where('userId', '==', userProfile.uid),
+      where('dateKey', '==', dateKey)
+    );
+    const snap = await getDocs(qy);
+    const count = snap.docs.length;
+    if (count >= 5) {
+      throw new Error('本日は既に5回出退勤しています。これ以上打刻できません。');
+    }
     console.debug('[Timecard][ensureRecord] Resolve hourlyWage start', {
       uid: userProfile.uid,
       orgId: userProfile.currentOrganizationId,

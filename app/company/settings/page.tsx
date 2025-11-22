@@ -46,8 +46,10 @@ export default function OrganizationSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [orgName, setOrgName] = useState('');
   const [settings, setSettings] = useState<Required<OrgPaySettings>>(defaultSettings);
-  const [shiftSubmissionEnforced, setShiftSubmissionEnforced] = useState<boolean>(false);
-  const [shiftSubmissionMinDaysBefore, setShiftSubmissionMinDaysBefore] = useState<number>(3);
+  const [shiftSubmissionCycle, setShiftSubmissionCycle] = useState<'weekly' | 'biweekly' | 'monthly'>('monthly');
+  const [weekStartDay, setWeekStartDay] = useState<number>(1); // 1=月曜
+  const [weeklyDeadlineDaysBefore, setWeeklyDeadlineDaysBefore] = useState<number>(3);
+  const [monthlyDeadlineDay, setMonthlyDeadlineDay] = useState<number>(25);
   const [isWatchAdmin, setIsWatchAdmin] = useState<boolean>(true);
   const [showWatchAdminDialog, setShowWatchAdminDialog] = useState<boolean>(false);
   const [pendingWatchAdminValue, setPendingWatchAdminValue] = useState<boolean>(true);
@@ -87,8 +89,10 @@ export default function OrganizationSettingsPage() {
           transportAllowanceEnabled: org.transportAllowanceEnabled ?? defaultSettings.transportAllowanceEnabled,
           transportAllowancePerShift: org.transportAllowancePerShift ?? defaultSettings.transportAllowancePerShift,
         });
-        setShiftSubmissionEnforced((org as any).shiftSubmissionEnforced ?? false);
-        setShiftSubmissionMinDaysBefore(Number((org as any).shiftSubmissionMinDaysBefore ?? 3));
+        setShiftSubmissionCycle(org.shiftSubmissionCycle ?? 'monthly');
+        setWeekStartDay(org.weekStartDay ?? 1);
+        setWeeklyDeadlineDaysBefore(org.weeklyDeadlineDaysBefore ?? 3);
+        setMonthlyDeadlineDay(org.monthlyDeadlineDay ?? 25);
         setIsWatchAdmin(org.isWatchAdmin ?? true);
       }
       setLoaded(true);
@@ -141,9 +145,16 @@ export default function OrganizationSettingsPage() {
         return;
       }
     }
-    if (shiftSubmissionEnforced) {
-      if (shiftSubmissionMinDaysBefore < 0 || shiftSubmissionMinDaysBefore > 365) {
-        alert('提出締切（日数）は0〜365の範囲で指定してください');
+    // シフト提出ルールのバリデーション
+    if (shiftSubmissionCycle === 'weekly' || shiftSubmissionCycle === 'biweekly') {
+      if (weeklyDeadlineDaysBefore < 1 || weeklyDeadlineDaysBefore > 30) {
+        alert('締切日数は1〜30の範囲で指定してください');
+        return;
+      }
+    }
+    if (shiftSubmissionCycle === 'monthly') {
+      if (monthlyDeadlineDay < 1 || monthlyDeadlineDay > 31) {
+        alert('締切日は1〜31の範囲で指定してください');
         return;
       }
     }
@@ -167,8 +178,10 @@ export default function OrganizationSettingsPage() {
           holidayIncludesWeekend: settings.holidayIncludesWeekend,
           transportAllowanceEnabled: settings.transportAllowanceEnabled,
           transportAllowancePerShift: settings.transportAllowancePerShift,
-          shiftSubmissionEnforced: shiftSubmissionEnforced,
-          shiftSubmissionMinDaysBefore: shiftSubmissionMinDaysBefore,
+          shiftSubmissionCycle: shiftSubmissionCycle,
+          weekStartDay: weekStartDay,
+          weeklyDeadlineDaysBefore: weeklyDeadlineDaysBefore,
+          monthlyDeadlineDay: monthlyDeadlineDay,
           isWatchAdmin: isWatchAdmin,
           updatedAt: Timestamp.now(),
         },
@@ -406,34 +419,78 @@ export default function OrganizationSettingsPage() {
           {/* シフト提出ルール */}
           <hr className="my-2" />
           <h3 className="text-md font-semibold text-gray-900">シフト提出ルール</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="flex items-end gap-3 md:col-span-3">
-              <div className="flex items-center gap-2">
-                <input
-                  id="submitEnforced"
-                  type="checkbox"
-                  checked={shiftSubmissionEnforced}
-                  onChange={(e) => setShiftSubmissionEnforced(e.target.checked)}
-                  disabled={!canEdit}
-                  className="h-4 w-4"
-                />
-                <label htmlFor="submitEnforced" className="text-sm font-medium text-gray-700">提出締切を有効にする</label>
-              </div>
-            </div>
-            <div className={`${shiftSubmissionEnforced ? '' : 'opacity-50'}`}>
-              <label className="block text-sm font-medium text-gray-700 mb-1">シフト日からの締切（日数）</label>
-              <input
-                type="number"
-                min={0}
-                max={365}
-                value={shiftSubmissionMinDaysBefore}
-                onChange={(e) => setShiftSubmissionMinDaysBefore(Number(e.target.value))}
-                disabled={!canEdit || !shiftSubmissionEnforced}
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">提出サイクル</label>
+              <select
+                value={shiftSubmissionCycle}
+                onChange={(e) => setShiftSubmissionCycle(e.target.value as 'weekly' | 'biweekly' | 'monthly')}
+                disabled={!canEdit}
                 className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="例: 3 (シフト日の3日前まで)"
-              />
-              <p className="mt-1 text-xs text-gray-600">例: 3 を設定すると、シフト日の3日前を過ぎると提出/編集/削除ができません（管理者は常に可）。</p>
+              >
+                <option value="weekly">1週間ごと</option>
+                <option value="biweekly">2週間ごと</option>
+                <option value="monthly">1ヶ月ごと</option>
+              </select>
             </div>
+
+            {(shiftSubmissionCycle === 'weekly' || shiftSubmissionCycle === 'biweekly') && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-blue-50 p-4 rounded-lg">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">週の開始日</label>
+                  <select
+                    value={weekStartDay}
+                    onChange={(e) => setWeekStartDay(Number(e.target.value))}
+                    disabled={!canEdit}
+                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value={0}>日曜日</option>
+                    <option value={1}>月曜日</option>
+                    <option value={2}>火曜日</option>
+                    <option value={3}>水曜日</option>
+                    <option value={4}>木曜日</option>
+                    <option value={5}>金曜日</option>
+                    <option value={6}>土曜日</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">締切（週開始の何日前）</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={weeklyDeadlineDaysBefore}
+                    onChange={(e) => setWeeklyDeadlineDaysBefore(Number(e.target.value))}
+                    disabled={!canEdit}
+                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="例: 3"
+                  />
+                  <p className="mt-1 text-xs text-gray-600">
+                    例: 3日前 → 週開始日の3日前までに提出
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {shiftSubmissionCycle === 'monthly' && (
+              <div className="bg-green-50 p-4 rounded-lg">
+                <label className="block text-sm font-medium text-gray-700 mb-1">締切日（毎月何日まで）</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={monthlyDeadlineDay}
+                  onChange={(e) => setMonthlyDeadlineDay(Number(e.target.value))}
+                  disabled={!canEdit}
+                  className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="例: 25"
+                />
+                <p className="mt-1 text-xs text-gray-600">
+                  例: 25日 → 毎月25日までに翌月のシフトを提出
+                </p>
+              </div>
+            )}
           </div>
 
           {/* タイムカード表示設定 */}

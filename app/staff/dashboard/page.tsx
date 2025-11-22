@@ -225,7 +225,7 @@ export default function PartTimeDashboard() {
             <h2 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">シフト提出</h2>
             <p className="text-sm sm:text-base text-gray-600 mb-3 sm:mb-4">今月のシフトを提出しましょう</p>
             <button
-              onClick={() => router.push('/staff/shifts/submit')}
+              onClick={() => router.push('/staff/shifts/request')}
               className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 active:bg-blue-800 transition text-sm sm:text-base"
             >
               シフトを提出

@@ -114,9 +114,16 @@ export default function TimecardPage() {
     );
     const snap = await getDocs(q);
 
-    if (!snap.empty) {
-      const docSnap = snap.docs[0];
-      return { id: docSnap.id, ...docSnap.data() } as TimecardRecord;
+    // 未完了のレコードを優先
+    const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as TimecardRecord));
+    const incomplete = docs.find(d => !d.clockOutAt);
+    if (incomplete) {
+      return incomplete;
+    }
+
+    // 5件以上ある場合は新規作成不可
+    if (snap.docs.length >= 5) {
+      throw new Error('本日は既に5回出退勤しています。これ以上打刻できません。');
     }
 
     // 時給を取得（member.hourlyWage → organization.defaultHourlyWage → fallback 1100）
@@ -160,8 +167,11 @@ export default function TimecardPage() {
       try {
         const rec = await ensureRecord();
         setRecord(rec);
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error loading record:', error);
+        if (error.message?.includes('5回')) {
+          alert(error.message);
+        }
       } finally {
         setLoading(false);
       }
@@ -190,9 +200,9 @@ export default function TimecardPage() {
         await setDoc(newDocRef, newRecord);
         setRecord(newRecord);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating field:', error);
-      alert('打刻に失敗しました。もう一度お試しください。');
+      alert(error.message || '打刻に失敗しました。もう一度お試しください。');
     }
   };
 

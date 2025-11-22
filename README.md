@@ -20,9 +20,9 @@ Next.js + Firebase で構築された、アルバイトスタッフ向けのシ�
 
 ### 👤 アルバイトスタッフ機能
 - 組織への加入申請 ([app/onboarding/join-organization/page.tsx](app/onboarding/join-organization/page.tsx), [app/onboarding/add-organization/page.tsx](app/onboarding/add-organization/page.tsx))
-- シフト提出（月/週/日ビュー対応） ([app/staff/shifts/submit/page.tsx](app/staff/shifts/submit/page.tsx))
+- シフト提出（月/週/日ビュー対応） ([app/staff/shifts/request/page.tsx](app/staff/shifts/request/page.tsx))
 - タイムカード打刻（出勤/休憩/退勤） ([app/staff/timecard/page.tsx](app/staff/timecard/page.tsx))
-- 承認済みシフト確認 ([app/staff/shifts/my/page.tsx](app/staff/shifts/my/page.tsx))
+- 承認済みシフト確認（組織全体） ([app/staff/shifts/schedule/page.tsx](app/staff/shifts/schedule/page.tsx))
 - 給与明細確認 ([app/staff/payroll/page.tsx](app/staff/payroll/page.tsx))
 
 ### 💰 給与計算機能
@@ -65,7 +65,6 @@ timecard-management-app/
 │   │   ├── profile/              # プロフィール
 │   │   └── shifts/               # シフト関連
 │   │       ├── submit/           # シフト提出
-│   │       ├── my/               # 自分のシフト
 │   │       └── schedule/         # 承認済みシフト（組織全体）
 │   ├── onboarding/               # 初回設定
 │   │   ├── join-organization/    # 組織加入申請
@@ -260,7 +259,7 @@ interface Timecard {
 2. [プロフィール設定](app/onboarding/profile-setup/page.tsx) で基本情報入力
 3. [企業ID入力](app/onboarding/join-organization/page.tsx) で組織に加入申請（管理者の承認待ち）
 4. 承認後、[ダッシュボード](app/staff/dashboard/page.tsx) で今月の見込み給与確認
-5. [シフト提出](app/staff/shifts/submit/page.tsx) でシフト登録
+5. [シフト提出](app/staff/shifts/request/page.tsx) でシフト登録（締切に注意）
 6. [タイムカード](app/staff/timecard/page.tsx) で出退勤打刻
 7. [給与明細](app/staff/payroll/page.tsx) で確定給与確認
 

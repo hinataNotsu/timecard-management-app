@@ -38,8 +38,10 @@ export default function ShiftSubmitPage() {
     note: '',
   });
   const [orgDefaultHourlyWage, setOrgDefaultHourlyWage] = useState<number>(1100);
-  const [shiftSubmissionEnforced, setShiftSubmissionEnforced] = useState<boolean>(false);
-  const [shiftSubmissionMinDaysBefore, setShiftSubmissionMinDaysBefore] = useState<number>(0);
+  const [shiftSubmissionCycle, setShiftSubmissionCycle] = useState<'weekly' | 'biweekly' | 'monthly'>('monthly');
+  const [weekStartDay, setWeekStartDay] = useState<number>(1);
+  const [weeklyDeadlineDaysBefore, setWeeklyDeadlineDaysBefore] = useState<number>(3);
+  const [monthlyDeadlineDay, setMonthlyDeadlineDay] = useState<number>(25);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStartInfo, setDragStartInfo] = useState<{ date: string; startY: number; startMin: number } | null>(null); // startYはpageY（スクロール含む絶対座標）
   const [tempShift, setTempShift] = useState<{ date: string; startTime: string; endTime: string } | null>(null);
@@ -49,40 +51,110 @@ export default function ShiftSubmitPage() {
 
 
 
-  // 提出期限チェック（組織設定: シフト日からX日前まで）
-  const canSubmitForMonth = (targetDate: Date): boolean => {
-    if (!shiftSubmissionEnforced) return true;
+  // 提出期限チェック
+  const getDeadlineFor = (targetDate: Date): Date | null => {
+    if (shiftSubmissionCycle === 'monthly') {
+      // 月次: 前月の締切日まで
+      const year = targetDate.getFullYear();
+      const month = targetDate.getMonth(); // 0-11
+      const deadlineDate = new Date(year, month - 1, monthlyDeadlineDay, 23, 59, 59);
+      return deadlineDate;
+    } else if (shiftSubmissionCycle === 'weekly') {
+      // 週次: 週の開始日のN日前
+      const weekStart = getWeekStart(targetDate, weekStartDay);
+      const deadline = new Date(weekStart);
+      deadline.setDate(deadline.getDate() - weeklyDeadlineDaysBefore);
+      deadline.setHours(23, 59, 59, 999);
+      return deadline;
+    } else if (shiftSubmissionCycle === 'biweekly') {
+      // 隔週: 対象日が含まれる2週間期間の開始日のN日前
+      const periodStart = getBiweeklyPeriodStart(targetDate, weekStartDay);
+      const deadline = new Date(periodStart);
+      deadline.setDate(deadline.getDate() - weeklyDeadlineDaysBefore);
+      deadline.setHours(23, 59, 59, 999);
+      return deadline;
+    }
+    return null;
+  };
+
+  // 隔週期間の開始日を取得（対象日が含まれる2週間の開始日）
+  const getBiweeklyPeriodStart = (date: Date, startDay: number): Date => {
+    // エポック(1970/1/1)から数えて、指定された週開始日で区切った週番号を計算
+    // 1970/1/1は木曜日なので、週開始日までの日数を調整
+    const epoch = new Date(1970, 0, 1); // 木曜日
+    const epochDay = epoch.getDay(); // 4 (木曜日)
+    
+    // エポックから最初の指定週開始日までの日数
+    const daysToFirstWeekStart = (startDay - epochDay + 7) % 7;
+    const firstWeekStart = new Date(1970, 0, 1 + daysToFirstWeekStart);
+    
+    // 対象日の週開始日を取得
+    const targetWeekStart = getWeekStart(date, startDay);
+    
+    // firstWeekStartからの週数を計算
+    const diffMs = targetWeekStart.getTime() - firstWeekStart.getTime();
+    const diffWeeks = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
+    
+    // 2週間ごとの期間に調整（偶数週の開始日を返す）
+    const periodWeeks = Math.floor(diffWeeks / 2) * 2;
+    const periodStart = new Date(firstWeekStart);
+    periodStart.setDate(periodStart.getDate() + periodWeeks * 7);
+    
+    return periodStart;
+  };
+
+  const getWeekStart = (date: Date, startDay: number): Date => {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = (day - startDay + 7) % 7;
+    d.setDate(d.getDate() - diff);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+
+  const canSubmitForDate = (date: Date): boolean => {
+    const deadline = getDeadlineFor(date);
+    if (!deadline) return true;
     const now = new Date();
-    const deadline = new Date(targetDate);
-    deadline.setDate(deadline.getDate() - shiftSubmissionMinDaysBefore);
-    // その日の0:00締切
-    deadline.setHours(0, 0, 0, 0);
     return now.getTime() <= deadline.getTime();
   };
 
   // 表示モードに応じて判定対象の日付を切り替え
   const displayDateForLock = viewMode === 'month' ? targetMonth : currentDate;
-  const isSubmissionLocked = !canSubmitForMonth(displayDateForLock);
+  const isSubmissionLocked = !canSubmitForDate(displayDateForLock);
 
-  // 日付単位の提出可否（週/日ビュー用）
-  const canSubmitForDate = (date: Date): boolean => {
-    return canSubmitForMonth(date);
-  };
-
-  // 提出期限までの残り時間を表示（基準となる日付を引数に取る）
+  // 提出期限までの残り時間を表示
   const getDeadlineMessageFor = (baseDate: Date): string => {
-    if (!shiftSubmissionEnforced) return '提出締切は無効です（企業設定で有効化すると適用されます）';
+    const deadline = getDeadlineFor(baseDate);
+    if (!deadline) return '提出締切は設定されていません';
+    
     const now = new Date();
-    const deadline = new Date(baseDate);
-    deadline.setDate(deadline.getDate() - shiftSubmissionMinDaysBefore);
-    deadline.setHours(0, 0, 0, 0);
     if (now.getTime() > deadline.getTime()) {
-      return `この期間の提出期限（シフト日の${shiftSubmissionMinDaysBefore}日前 0:00）は過ぎています`;
+      if (shiftSubmissionCycle === 'biweekly') {
+        const periodStart = getBiweeklyPeriodStart(baseDate, weekStartDay);
+        const periodEnd = new Date(periodStart);
+        periodEnd.setDate(periodEnd.getDate() + 13); // 2週間-1日
+        return `この期間(${periodStart.toLocaleDateString()}～${periodEnd.toLocaleDateString()})の提出期限は過ぎています（締切: ${deadline.toLocaleDateString()}）`;
+      }
+      return `この期間の提出期限は過ぎています（${deadline.toLocaleDateString()} ${deadline.toLocaleTimeString()}）`;
     }
+    
     const diffMs = deadline.getTime() - now.getTime();
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
     const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    return `提出期限（シフト日の${shiftSubmissionMinDaysBefore}日前 0:00）まで残り${diffDays}日${diffHours}時間`;
+    
+    if (shiftSubmissionCycle === 'monthly') {
+      return `提出期限: 毎月${monthlyDeadlineDay}日まで（残り${diffDays}日${diffHours}時間）`;
+    } else if (shiftSubmissionCycle === 'biweekly') {
+      const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+      const periodStart = getBiweeklyPeriodStart(baseDate, weekStartDay);
+      const periodEnd = new Date(periodStart);
+      periodEnd.setDate(periodEnd.getDate() + 13); // 2週間-1日
+      return `提出期限: 2週間期間(${periodStart.toLocaleDateString()}～${periodEnd.toLocaleDateString()})開始の${weeklyDeadlineDaysBefore}日前まで（残り${diffDays}日${diffHours}時間）`;
+    } else {
+      const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+      return `提出期限: 週開始(${dayNames[weekStartDay]})の${weeklyDeadlineDaysBefore}日前まで（残り${diffDays}日${diffHours}時間）`;
+    }
   };
 
   useEffect(() => {
@@ -103,8 +175,11 @@ export default function ShiftSubmitPage() {
         const org = orgSnap.exists() ? (orgSnap.data() as any) : {};
         const hourly = org.defaultHourlyWage != null ? Number(org.defaultHourlyWage) : 1100;
         if (!Number.isNaN(hourly) && hourly > 0) setOrgDefaultHourlyWage(hourly);
-        setShiftSubmissionEnforced(!!org.shiftSubmissionEnforced);
-        setShiftSubmissionMinDaysBefore(Number(org.shiftSubmissionMinDaysBefore ?? 0));
+        
+        setShiftSubmissionCycle(org.shiftSubmissionCycle ?? 'monthly');
+        setWeekStartDay(org.weekStartDay ?? 1);
+        setWeeklyDeadlineDaysBefore(org.weeklyDeadlineDaysBefore ?? 3);
+        setMonthlyDeadlineDay(org.monthlyDeadlineDay ?? 25);
       } catch (e) {
         console.warn('[Shift Submit] failed to load org settings', e);
       }
@@ -231,6 +306,14 @@ export default function ShiftSubmitPage() {
     const handleMouseMove = async (e: MouseEvent) => {
       if (!resizingShift) return;
 
+      // 締切チェック：対象のシフトの日付を取得
+      const targetShift = shifts.find(s => s.id === resizingShift.id);
+      if (targetShift && !canSubmitForDate(new Date(targetShift.date))) {
+        alert('この日のシフトは締切を過ぎているため変更できません');
+        setResizingShift(null);
+        return;
+      }
+
       const deltaY = e.pageY - resizingShift.startY;
       const pixelPerHour = viewMode === 'week' ? 48 : 64;
       const deltaMin = Math.round((deltaY / pixelPerHour) * 60 / 15) * 15;
@@ -271,6 +354,14 @@ export default function ShiftSubmitPage() {
     const handleTouchMove = async (e: TouchEvent) => {
       if (!resizingShift) return;
       e.preventDefault(); // スクロール防止
+
+      // 締切チェック：対象のシフトの日付を取得
+      const targetShift = shifts.find(s => s.id === resizingShift.id);
+      if (targetShift && !canSubmitForDate(new Date(targetShift.date))) {
+        alert('この日のシフトは締切を過ぎているため変更できません');
+        setResizingShift(null);
+        return;
+      }
 
       const touch = e.touches[0];
       const deltaY = touch.pageY - resizingShift.startY;

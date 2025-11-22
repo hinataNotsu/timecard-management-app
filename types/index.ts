@@ -47,6 +47,11 @@ export interface Organization {
   transportAllowancePerShift?: number; // 1シフトあたり交通費（円）
   // タイムカード表示設定
   isWatchAdmin?: boolean; // 管理者ダッシュボードにタイムカードを表示するか（true: 管理者, false: アルバイト）デフォルトtrue
+  // シフト提出ルール
+  shiftSubmissionCycle?: 'weekly' | 'biweekly' | 'monthly'; // シフト提出サイクル
+  weekStartDay?: number; // 週の開始日 (0=日曜, 1=月曜, ..., 6=土曜)
+  weeklyDeadlineDaysBefore?: number; // 週の開始日の何日前が締切か
+  monthlyDeadlineDay?: number; // 月次締切日 (1-31)
 }
 
 // シフト情報
