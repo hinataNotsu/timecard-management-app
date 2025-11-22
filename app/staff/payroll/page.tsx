@@ -371,11 +371,13 @@ export default function PartTimePayrollPage() {
             <div className="flex items-center gap-2">
               <p className="text-xl sm:text-2xl font-bold text-gray-900">¥{Math.round(summary.total).toLocaleString('ja-JP')}</p>
               {summary.allApproved ? (
-                <svg className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" title="全て承認済み">
+                <svg className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-label="全て承認済み">
+                  <title>全て承認済み</title>
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                 </svg>
               ) : timecards.length > 0 ? (
-                <svg className="w-5 h-5 sm:w-6 sm:h-6 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="3,3" viewBox="0 0 20 20" title="未確定">
+                <svg className="w-5 h-5 sm:w-6 sm:h-6 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="3,3" viewBox="0 0 20 20" aria-label="未確定">
+                  <title>未確定</title>
                   <circle cx="10" cy="10" r="7" />
                 </svg>
               ) : null}
