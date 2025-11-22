@@ -15,9 +15,14 @@ export default function CompanyLayout({
   useEffect(() => {
     if (!loading) {
       if (!userProfile) {
-        router.push('/login/company');
+        router.push('/');
       } else if (!userProfile.isManage) {
-        router.push('/company/dashboard');
+        router.push('/');
+      } else if (userProfile.currentOrganizationId && 
+                 (!userProfile.organizationIds || 
+                  !userProfile.organizationIds.includes(userProfile.currentOrganizationId))) {
+        // 現在選択中の組織が自分の所属リストにない場合
+        router.push('/');
       }
     }
   }, [userProfile, loading, router]);
@@ -28,6 +33,19 @@ export default function CompanyLayout({
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">読み込み中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 所属チェック
+  if (userProfile.currentOrganizationId && 
+      (!userProfile.organizationIds || 
+       !userProfile.organizationIds.includes(userProfile.currentOrganizationId))) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <p className="text-gray-600">この組織にアクセスする権限がありません</p>
         </div>
       </div>
     );

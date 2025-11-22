@@ -66,18 +66,18 @@ export default function OrganizationSelector({ onOrganizationChange }: Organizat
     setIsOpen(false);
     // 現在のダッシュボードタイプを判定
     const currentPath = window.location.pathname;
-    const returnTo = currentPath.includes('/company') ? 'company' : 'part-time';
-    router.push(`/add-organization?returnTo=${returnTo}`);
+    const returnTo = currentPath.includes('/company') ? 'company' : 'staff';
+    router.push(`/onboarding/add-organization?returnTo=${returnTo}`);
   };
 
   if (loading || !userProfile) {
     return <div className="text-sm text-gray-600">読み込み中...</div>;
   }
 
-  // isManage=trueのユーザーがpart-timeダッシュボードにいる場合は組織追加を許可しない
+  // isManage=trueのユーザーがstaffダッシュボードにいる場合は組織追加を許可しない
   const currentPath = window.location.pathname;
-  const isPartTimeDashboard = currentPath.includes('/part-time');
-  const canAddOrganization = !(userProfile.isManage && isPartTimeDashboard);
+  const isStaffDashboard = currentPath.includes('/staff');
+  const canAddOrganization = !(userProfile.isManage && isStaffDashboard);
 
   if (organizations.length === 0) {
     if (!canAddOrganization) {

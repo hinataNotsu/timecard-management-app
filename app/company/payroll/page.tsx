@@ -553,8 +553,8 @@ export default function PayrollPage() {
 
       {/* 詳細モーダル */}
       {selectedApp && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4" onClick={() => setSelectedUserId(null)}>
-          <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedUserId(null)}>
+          <div className="bg-white rounded-lg shadow-2xl max-w-6xl w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <img src={selectedApp.avatarUrl} alt={selectedApp.userName} className="w-10 h-10 rounded-full ring-1 ring-gray-200" />

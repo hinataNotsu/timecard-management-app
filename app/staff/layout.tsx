@@ -15,7 +15,7 @@ export default function StaffLayout({
   useEffect(() => {
     if (!loading) {
       if (!userProfile) {
-        router.push('/login/part-time');
+        router.push('/');
       } else if (userProfile.isManage) {
         router.push('/staff/dashboard');
       }
