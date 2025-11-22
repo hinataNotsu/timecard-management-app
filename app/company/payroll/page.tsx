@@ -584,6 +584,7 @@ export default function PayrollPage() {
                     <th className="p-2 border-b text-center">深夜(分)</th>
                     <th className="p-2 border-b text-center">残業(分)</th>
                     <th className="p-2 border-b text-center">時給</th>
+                    <th className="p-2 border-b text-center">交通費(円)</th>
                     <th className="p-2 border-b text-center">合計(円)</th>
                     <th className="p-2 border-b text-center">操作</th>
                   </tr>
@@ -642,6 +643,7 @@ export default function PayrollPage() {
                         <td className="p-2 border-b text-center">{bd.nightMin}</td>
                         <td className="p-2 border-b text-center">{bd.overtimeMin}</td>
                         <td className="p-2 border-b text-center">¥{tc.hourlyWage ?? orgSettings?.defaultHourlyWage ?? 1100}</td>
+                        <td className="p-2 border-b text-center">¥{Math.round(bd.transport).toLocaleString('ja-JP')}</td>
                         <td className="p-2 border-b text-center font-semibold">¥{bd.total.toLocaleString('ja-JP')}</td>
                         <td className="p-2 border-b text-center">
                           {isEditing ? (
@@ -660,12 +662,15 @@ export default function PayrollPage() {
                 <tfoot>
                   <tr className="bg-gray-100 font-semibold">
                     <td className="p-2 border-t text-center">合計</td>
-                    <td className="p-2 border-t text-center" colSpan={3}></td>
+                    <td className="p-2 border-t text-center" colSpan={4}></td>
+                    <td className="p-2 border-t text-center">{selectedApp.breakMinutes}分</td>
                     <td className="p-2 border-t text-center">{selectedApp.totalMinutes}分</td>
                     <td className="p-2 border-t text-center">{selectedApp.nightMinutes}分</td>
                     <td className="p-2 border-t text-center">{selectedApp.overtimeMinutes}分</td>
                     <td className="p-2 border-t text-center"></td>
+                    <td className="p-2 border-t text-center">¥{Math.round(selectedApp.transport).toLocaleString('ja-JP')}</td>
                     <td className="p-2 border-t text-center text-emerald-600">¥{Math.round(selectedApp.total).toLocaleString('ja-JP')}</td>
+                    <td className="p-2 border-t text-center"></td>
                   </tr>
                 </tfoot>
               </table>

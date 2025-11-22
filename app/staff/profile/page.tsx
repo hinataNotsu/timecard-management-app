@@ -193,37 +193,41 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white shadow">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={() => router.back()} className="px-3 py-2 rounded bg-gray-100 hover:bg-gray-200 text-gray-700">戻る</button>
-            <h1 className="text-2xl font-bold text-gray-900">{onboardingStep === 'password' ? '初回設定: パスワード変更' : (isOnboarding ? 'プロフィール登録' : 'プロフィール編集')}</h1>
+        <div className="max-w-3xl mx-auto px-3 sm:px-4 lg:px-8 py-3 sm:py-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <button onClick={() => router.back()} className="px-3 py-2 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm sm:text-base">戻る</button>
+              <h1 className="text-base sm:text-2xl font-bold text-gray-900">{onboardingStep === 'password' ? '初回設定: パスワード変更' : (isOnboarding ? 'プロフィール登録' : 'プロフィール編集')}</h1>
+            </div>
+            {onboardingStep !== 'password' && (
+              <button
+                onClick={save}
+                disabled={saving}
+                className={`px-4 py-2 rounded text-sm sm:text-base font-semibold whitespace-nowrap ${saving ? 'bg-gray-300 text-gray-600' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
+              >
+                {saving ? '保存中...' : (isOnboarding ? '登録' : '保存')}
+              </button>
+            )}
           </div>
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-3xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8">
         {onboardingStep !== 'password' && (
-        <div className="bg-white rounded-lg shadow p-6 space-y-6">
+        <div className="bg-white rounded-lg shadow p-4 sm:p-6 space-y-4 sm:space-y-6">
           {isOnboarding && (
             <div className="mb-2 bg-blue-50 border border-blue-200 rounded p-3">
               <p className="text-sm text-blue-800">初回ログインのため、プロフィールを登録してください（表示名は必須）。</p>
             </div>
           )}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <img src={avatarUrl(avatarSeed || displayName || userProfile.uid, avatarBackgroundColor)} alt="avatar" className="w-16 h-16 rounded-full ring-1 ring-gray-200" />
-              <div>
-                <p className="text-sm text-gray-600">プレビュー（DiceBear）</p>
-                <p className="text-xs text-gray-500">表示名/シードを変更すると自動で更新されます</p>
-              </div>
+          
+          {/* アバタープレビュー */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+            <img src={avatarUrl(avatarSeed || displayName || userProfile.uid, avatarBackgroundColor)} alt="avatar" className="w-16 h-16 rounded-full ring-1 ring-gray-200" />
+            <div className="flex-1">
+              <p className="text-sm text-gray-600">プレビュー（DiceBear）</p>
+              <p className="text-xs text-gray-500">表示名/シードを変更すると自動で更新されます</p>
             </div>
-            <button
-              onClick={save}
-              disabled={saving}
-              className={`px-4 py-2 rounded ${saving ? 'bg-gray-300 text-gray-600' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
-            >
-              {saving ? '保存中...' : (isOnboarding ? '登録を完了' : '保存')}
-            </button>
           </div>
 
           <div>
@@ -232,8 +236,8 @@ export default function ProfilePage() {
               type="text"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            maxLength={30}
+              className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-base"
+              maxLength={30}
               placeholder="例: 山田 太郎"
             />
           </div>
@@ -244,7 +248,7 @@ export default function ProfilePage() {
               type="email"
               value={email}
               disabled
-              className="w-full px-3 py-2 border rounded bg-gray-50 text-gray-600"
+              className="w-full px-3 py-2 border rounded bg-gray-50 text-gray-600 text-base"
             />
           </div>
 
@@ -254,7 +258,7 @@ export default function ProfilePage() {
               type="tel"
               value={phoneNumber}
               onChange={(e) => setPhoneNumber(e.target.value)}
-              className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-base"
               placeholder="例: 090-1234-5678"
             />
           </div>
@@ -265,7 +269,7 @@ export default function ProfilePage() {
               type="text"
               value={avatarSeed}
               onChange={(e) => setAvatarSeed(e.target.value)}
-              className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-base"
               placeholder="表示名ベースで自動生成されます"
             />
           </div>
@@ -294,7 +298,7 @@ export default function ProfilePage() {
 
         {/* パスワード変更セクション */}
         {onboardingStep !== 'profile' && (
-        <div className="mt-4 bg-white rounded-lg shadow p-6 space-y-4">
+        <div className="mt-4 bg-white rounded-lg shadow p-4 sm:p-6 space-y-4">
           {(userProfile?.requirePasswordChange || onboardingStep === 'password') && (
             <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded p-3">
               <p className="text-sm text-yellow-800">
@@ -302,12 +306,12 @@ export default function ProfilePage() {
               </p>
             </div>
           )}
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900">パスワード変更</h2>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <h2 className="text-base sm:text-lg font-semibold text-gray-900">パスワード変更</h2>
             {onboardingStep !== 'password' && (
               <button
                 onClick={() => setShowPasswordChange(!showPasswordChange)}
-                className="px-3 py-1 text-sm rounded bg-gray-100 hover:bg-gray-200 text-gray-700"
+                className="px-3 py-1.5 text-sm rounded bg-gray-100 hover:bg-gray-200 text-gray-700 w-fit"
               >
                 {showPasswordChange ? '閉じる' : '変更する'}
               </button>

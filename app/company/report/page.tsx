@@ -562,7 +562,7 @@ export default function ReportPage() {
         )}
 
         <div className="mt-4 text-sm text-gray-600 space-y-1">
-          <p>※ 承認済み（status=approved）のタイムカードのみを集計しています</p>
+          <p>※ 承認済みのタイムカードのみを集計しています</p>
           <p>※ 詳細ボタンで個別の勤怠履歴を確認できます</p>
         </div>
       </div>

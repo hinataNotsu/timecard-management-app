@@ -190,18 +190,19 @@ export default function PartTimePayrollPage() {
   };
 
   const summary = useMemo(() => {
-    // 承認済みのみ集計
-    const approved = timecards.filter(t => t.status === 'approved');
+    // 全てのステータス(下書き、申請中、承認済み、却下)を集計
     const uniqueDays = new Set<string>();
     let totalMin = 0, nightMin = 0, overtimeMin = 0;
     let base = 0, night = 0, overtime = 0, holiday = 0, transport = 0, total = 0;
-    for (const s of approved) {
+    for (const s of timecards) {
       uniqueDays.add(s.dateKey);
       const bd = calcBreakdown(s);
       totalMin += bd.totalMin; nightMin += bd.nightMin; overtimeMin += bd.overtimeMin;
       base += bd.base; night += bd.night; overtime += bd.overtime; holiday += bd.holiday; transport += bd.transport; total += bd.total;
     }
-    return { days: uniqueDays.size, totalMin, nightMin, overtimeMin, base, night, overtime, holiday, transport, total, approvedCount: approved.length };
+    // 全てのタイムカードが承認済みかチェック
+    const allApproved = timecards.length > 0 && timecards.every(t => t.status === 'approved');
+    return { days: uniqueDays.size, totalMin, nightMin, overtimeMin, base, night, overtime, holiday, transport, total, allApproved };
   }, [timecards, orgSettings, transportPerShift]);
 
   const exportCsv = () => {
@@ -348,30 +349,42 @@ export default function PartTimePayrollPage() {
         </div>
 
         {/* サマリーカード */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-          <div className="bg-white rounded-lg shadow p-4">
-            <p className="text-sm text-gray-600 mb-1">出勤日数</p>
-            <p className="text-2xl font-bold text-gray-900">{summary.days}日</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 sm:gap-4 mb-6">
+          <div className="bg-white rounded-lg shadow p-3 sm:p-4">
+            <p className="text-xs sm:text-sm text-gray-600 mb-1">出勤日数</p>
+            <p className="text-xl sm:text-2xl font-bold text-gray-900">{summary.days}日</p>
           </div>
-          <div className="bg-white rounded-lg shadow p-4">
-            <p className="text-sm text-gray-600 mb-1">総労働時間</p>
-            <p className="text-2xl font-bold text-gray-900">{(summary.totalMin/60).toFixed(1)}時間</p>
+          <div className="bg-white rounded-lg shadow p-3 sm:p-4">
+            <p className="text-xs sm:text-sm text-gray-600 mb-1">総労働時間</p>
+            <p className="text-xl sm:text-2xl font-bold text-gray-900">{(summary.totalMin/60).toFixed(1)}h</p>
           </div>
-          <div className="bg-white rounded-lg shadow p-4">
-            <p className="text-sm text-gray-600 mb-1">深夜時間</p>
-            <p className="text-2xl font-bold text-gray-900">{(summary.nightMin/60).toFixed(1)}時間</p>
+          <div className="bg-white rounded-lg shadow p-3 sm:p-4">
+            <p className="text-xs sm:text-sm text-gray-600 mb-1">深夜時間</p>
+            <p className="text-xl sm:text-2xl font-bold text-gray-900">{(summary.nightMin/60).toFixed(1)}h</p>
           </div>
-          <div className="bg-white rounded-lg shadow p-4">
-            <p className="text-sm text-gray-600 mb-1">交通費合計</p>
-            <p className="text-2xl font-bold text-gray-900">¥{Math.round(summary.transport).toLocaleString('ja-JP')}</p>
+          <div className="bg-white rounded-lg shadow p-3 sm:p-4">
+            <p className="text-xs sm:text-sm text-gray-600 mb-1">交通費合計</p>
+            <p className="text-xl sm:text-2xl font-bold text-gray-900">¥{Math.round(summary.transport).toLocaleString('ja-JP')}</p>
           </div>
-          <div className="bg-white rounded-lg shadow p-4">
-            <p className="text-sm text-gray-600 mb-1">総支給額</p>
-            <p className="text-2xl font-bold text-gray-900">¥{Math.round(summary.total).toLocaleString('ja-JP')}</p>
+          <div className="bg-white rounded-lg shadow p-3 sm:p-4 col-span-2 sm:col-span-1">
+            <p className="text-xs sm:text-sm text-gray-600 mb-1">総支給額</p>
+            <div className="flex items-center gap-2">
+              <p className="text-xl sm:text-2xl font-bold text-gray-900">¥{Math.round(summary.total).toLocaleString('ja-JP')}</p>
+              {summary.allApproved ? (
+                <svg className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" title="全て承認済み">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+              ) : timecards.length > 0 ? (
+                <svg className="w-5 h-5 sm:w-6 sm:h-6 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="3,3" viewBox="0 0 20 20" title="未確定">
+                  <circle cx="10" cy="10" r="7" />
+                </svg>
+              ) : null}
+            </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow overflow-hidden">
+        {/* デスクトップ: テーブル表示 */}
+        <div className="hidden lg:block bg-white rounded-lg shadow overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
@@ -426,7 +439,7 @@ export default function PartTimePayrollPage() {
             {!loading && timecards.length > 0 && (
               <tfoot>
                 <tr className="bg-gray-100 font-semibold">
-                  <td className="p-2 border-t text-center">承認済み合計</td>
+                  <td className="p-2 border-t text-center">合計</td>
                   <td className="p-2 border-t text-center" colSpan={4}></td>
                   <td className="p-2 border-t text-center">{summary.totalMin}</td>
                   <td className="p-2 border-t text-center">{summary.nightMin}</td>
@@ -441,6 +454,88 @@ export default function PartTimePayrollPage() {
               </tfoot>
             )}
           </table>
+        </div>
+
+        {/* モバイル: カード表示 */}
+        <div className="lg:hidden space-y-3">
+          {loading ? (
+            <div className="bg-white rounded-lg shadow p-4 text-center">読み込み中...</div>
+          ) : timecards.length === 0 ? (
+            <div className="bg-white rounded-lg shadow p-4 text-center">タイムカードがありません</div>
+          ) : (
+            timecards.map(s => {
+              const bd = calcBreakdown(s);
+              const fmt = (ts?: Timestamp) => ts ? ts.toDate().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'}) : '--:--';
+              const statusLabel = s.status === 'approved' ? '承認済み' : s.status === 'rejected' ? '却下' : s.status === 'pending' ? '申請中' : '下書き';
+              const statusColor = s.status === 'approved' ? 'bg-green-100 text-green-800' : s.status === 'rejected' ? 'bg-red-100 text-red-800' : s.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800';
+              return (
+                <div key={s.id} className="bg-white rounded-lg shadow p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="font-semibold text-base">{s.dateKey}</div>
+                    <span className={`px-2 py-1 rounded text-xs ${statusColor}`}>{statusLabel}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-sm mb-3">
+                    <div>
+                      <span className="text-gray-600">出勤:</span> <span className="font-medium">{fmt(s.clockInAt)}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">退勤:</span> <span className="font-medium">{fmt(s.clockOutAt)}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">休憩:</span> <span className="font-medium">{bd.breakMin}分</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">勤務:</span> <span className="font-medium">{bd.totalMin}分</span>
+                    </div>
+                    {bd.nightMin > 0 && (
+                      <div>
+                        <span className="text-gray-600">深夜:</span> <span className="font-medium">{bd.nightMin}分</span>
+                      </div>
+                    )}
+                    {bd.overtimeMin > 0 && (
+                      <div>
+                        <span className="text-gray-600">残業:</span> <span className="font-medium">{bd.overtimeMin}分</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="border-t pt-3 space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">基本給</span>
+                      <span className="font-medium">¥{Math.round(bd.base).toLocaleString('ja-JP')}</span>
+                    </div>
+                    {bd.night > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">深夜手当</span>
+                        <span className="font-medium">¥{Math.round(bd.night).toLocaleString('ja-JP')}</span>
+                      </div>
+                    )}
+                    {bd.overtime > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">残業手当</span>
+                        <span className="font-medium">¥{Math.round(bd.overtime).toLocaleString('ja-JP')}</span>
+                      </div>
+                    )}
+                    {bd.holiday > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">休日手当</span>
+                        <span className="font-medium">¥{Math.round(bd.holiday).toLocaleString('ja-JP')}</span>
+                      </div>
+                    )}
+                    {bd.transport > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">交通費</span>
+                        <span className="font-medium">¥{Math.round(bd.transport).toLocaleString('ja-JP')}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between pt-2 border-t font-semibold text-base">
+                      <span>合計</span>
+                      <span className="text-emerald-600">¥{Math.round(bd.total).toLocaleString('ja-JP')}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>
