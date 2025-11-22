@@ -40,13 +40,13 @@ export default function Home() {
             </div>
             <div className="space-y-3">
               <Link
-                href="/login/part-time"
+                href="/auth/login/part-time"
                 className="block w-full px-6 py-3 bg-blue-600 text-white text-center rounded-lg font-semibold hover:bg-blue-700 transition"
               >
                 ログイン
               </Link>
               <Link
-                href="/signup/part-time"
+                href="/auth/signup/part-time"
                 className="block w-full px-6 py-3 bg-white text-blue-600 text-center rounded-lg font-semibold border-2 border-blue-600 hover:bg-blue-50 transition"
               >
                 新規会員登録
@@ -69,13 +69,13 @@ export default function Home() {
             </div>
             <div className="space-y-3">
               <Link
-                href="/login/company"
+                href="/auth/login/company"
                 className="block w-full px-6 py-3 bg-purple-600 text-white text-center rounded-lg font-semibold hover:bg-purple-700 transition"
               >
                 ログイン
               </Link>
               <Link
-                href="/signup/company"
+                href="/auth/signup/company"
                 className="block w-full px-6 py-3 bg-white text-purple-600 text-center rounded-lg font-semibold border-2 border-purple-600 hover:bg-purple-50 transition"
               >
                 企業登録
