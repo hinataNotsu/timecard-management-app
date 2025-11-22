@@ -97,3 +97,38 @@ export interface ShiftFormData {
   breakTime: number;
   hourlyWage: number;
 }
+
+// 月次レポート情報
+export interface MonthlyReport {
+  id: string; // {organizationId}_{year}-{month}_{userId}
+  organizationId: string;
+  userId: string;
+  userName: string;
+  year: number;
+  month: number;
+  // 集計データ
+  workDays: number; // 出勤日数
+  totalWorkMinutes: number; // 総労働時間（分）
+  totalBreakMinutes: number; // 総休憩時間（分）
+  totalNightMinutes: number; // 深夜時間（分）
+  totalOvertimeMinutes: number; // 残業時間（分）
+  baseWage: number; // 基本給
+  nightPremium: number; // 深夜割増
+  overtimePremium: number; // 残業割増
+  holidayPremium: number; // 休日割増
+  transportAllowance: number; // 交通費
+  totalAmount: number; // 総支給額
+  timecardCount: number; // タイムカード件数
+  // レポート状態
+  status: 'confirmed' | 'reverted'; // confirmed: 確定済み, reverted: 差し戻し済み
+  version: number; // バージョン（再承認のたびにインクリメント）
+  // 承認情報
+  approvedAt: Timestamp;
+  approvedBy: string;
+  // 差し戻し情報（オプション）
+  revertedAt?: Timestamp;
+  revertedBy?: string;
+  revertReason?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}

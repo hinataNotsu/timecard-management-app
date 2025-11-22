@@ -13,6 +13,8 @@ interface MemberRow {
   avatarBgColor?: string;
   transportAllowancePerShift?: number;
   hourlyWage?: number;
+  deleted?: boolean;
+  deletedAt?: Timestamp;
 }
 
 interface Request {
@@ -108,6 +110,7 @@ export default function OrganizationMembersPage() {
         const list: MemberRow[] = usnap.docs.map((d) => {
           const u = d.data() as any;
           const settings = settingsMap.get(d.id);
+          const memberData = memberSnap.docs.find(m => m.id === d.id)?.data() as any;
           return {
             uid: u.uid || d.id,
             displayName: u.displayName || d.id,
@@ -116,6 +119,8 @@ export default function OrganizationMembersPage() {
             avatarBgColor: u.avatarBackgroundColor,
             transportAllowancePerShift: settings?.transport,
             hourlyWage: settings?.wage,
+            deleted: memberData?.deleted || false,
+            deletedAt: memberData?.deletedAt,
           };
         }).sort((a, b) => (a.displayName || a.email).localeCompare(b.displayName || b.email));
 
@@ -171,9 +176,35 @@ export default function OrganizationMembersPage() {
     }
   };
 
+  const markAsRetired = async (uid: string, displayName: string) => {
+    if (!orgId) return;
+    if (!confirm(`${displayName} をこの組織で退職済みにしますか？\n\n※ この組織でのアクセスができなくなります\n※ 他の組織には影響しません\n※ 過去のシフトやタイムカードは記録として残ります`)) return;
+    
+    setRemoving(uid);
+    try {
+      // membersサブコレクションにdeleted: trueを設定
+      await updateDoc(doc(db, 'organizations', orgId, 'members', uid), {
+        deleted: true,
+        deletedAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+
+      // UIを更新
+      setRows(prev => prev.map(r => 
+        r.uid === uid ? { ...r, deleted: true, deletedAt: Timestamp.now() } : r
+      ));
+      alert('退職処理が完了しました');
+    } catch (e: any) {
+      console.error('[Members] retire error', e);
+      alert('退職処理に失敗しました');
+    } finally {
+      setRemoving(null);
+    }
+  };
+
   const removeFromOrg = async (uid: string, displayName: string) => {
     if (!orgId) return;
-    if (!confirm(`${displayName} をこの組織から削除しますか？\n\n※ ユーザーはこの組織にアクセスできなくなります。\n※ 過去のシフトやタイムカードは記録として残ります。`)) return;
+    if (!confirm(`${displayName} をこの組織から完全に削除しますか？\n\n※ ユーザーは組織メンバーリストから削除されます\n※ 過去のシフトやタイムカードは記録として残ります`)) return;
     
     setRemoving(uid);
     try {
@@ -342,26 +373,28 @@ export default function OrganizationMembersPage() {
         {/* メンバー一覧タブ */}
         {activeTab === 'members' && (
           <>
-            {/* ...existing code... */}
-
-            <div className="bg-white rounded-lg shadow overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="p-2 border-b text-left" colSpan={2}>氏名</th>
-                    <th className="p-2 border-b text-left">メール</th>
-                    <th className="p-2 border-b text-center">時給（円/h）</th>
-                    <th className="p-2 border-b text-center">交通費（円/シフト）</th>
-                    <th className="p-2 border-b text-center" colSpan={2}>操作</th>
-                  </tr>
-                </thead>
+            {/* 在籍メンバー */}
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold mb-3">在籍メンバー</h2>
+              <div className="bg-white rounded-lg shadow overflow-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="p-2 border-b text-left" colSpan={2}>氏名</th>
+                      <th className="p-2 border-b text-left">メール</th>
+                      <th className="p-2 border-b text-center">時給（円/h）</th>
+                      <th className="p-2 border-b text-center">交通費（円/シフト）</th>
+                      <th className="p-2 border-b text-center">保存</th>
+                      <th className="p-2 border-b text-center">退職処理</th>
+                    </tr>
+                  </thead>
                 <tbody>
-                  {loading ? (
-                    <tr><td className="p-4 text-center" colSpan={6}>読み込み中...</td></tr>
-                  ) : rows.length === 0 ? (
-                    <tr><td className="p-4 text-center" colSpan={6}>メンバーがいません</td></tr>
-                  ) : (
-                    rows.map((r, idx) => (
+                    {loading ? (
+                      <tr><td className="p-4 text-center" colSpan={7}>読み込み中...</td></tr>
+                    ) : rows.filter(r => !r.deleted).length === 0 ? (
+                      <tr><td className="p-4 text-center" colSpan={7}>在籍メンバーがいません</td></tr>
+                    ) : (
+                      rows.filter(r => !r.deleted).map((r) => (
                       <tr key={r.uid} className="hover:bg-gray-50">
                         <td className="p-2 border-b w-12">
                           <img src={avatarUrl(r.avatarSeed || r.displayName || r.uid, r.avatarBgColor)} alt={r.displayName} className="w-8 h-8 rounded-full ring-1 ring-gray-200" />
@@ -405,17 +438,60 @@ export default function OrganizationMembersPage() {
                         </td>
                         <td className="p-2 border-b text-center">
                           <button
-                            onClick={() => removeFromOrg(r.uid, r.displayName)}
+                            onClick={() => markAsRetired(r.uid, r.displayName)}
                             disabled={removing === r.uid}
-                            className={`px-3 py-1 rounded text-sm ${removing === r.uid ? 'bg-gray-300 text-gray-500' : 'bg-red-600 text-white hover:bg-red-700'}`}
-                          >{removing === r.uid ? '削除中' : 'ユーザー削除'}</button>
+                            className={`px-3 py-1 rounded text-sm ${removing === r.uid ? 'bg-gray-300 text-gray-500' : 'bg-amber-600 text-white hover:bg-amber-700'}`}
+                          >{removing === r.uid ? '処理中' : '退職処理'}</button>
                         </td>
                       </tr>
                     ))
                   )}
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+              </div>
             </div>
+
+            {/* 退職済みメンバー */}
+            {rows.filter(r => r.deleted).length > 0 && (
+              <div>
+                <h2 className="text-lg font-semibold mb-3 text-gray-600">退職済みメンバー</h2>
+                <div className="bg-gray-50 rounded-lg shadow overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-100">
+                      <tr>
+                        <th className="p-3 border-b text-left">氏名</th>
+                        <th className="p-3 border-b text-left">メールアドレス</th>
+                        <th className="p-3 border-b text-center">退職日</th>
+                        <th className="p-3 border-b text-center">完全削除</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.filter(r => r.deleted).map(r => (
+                        <tr key={r.uid} className="hover:bg-gray-100">
+                          <td className="p-2 border-b">
+                            <div className="flex items-center gap-2">
+                              <img src={avatarUrl(r.avatarSeed || r.displayName, r.avatarBgColor)} alt={r.displayName} className="w-8 h-8 rounded-full" />
+                              <span className="text-gray-500">(退職済み) {r.displayName}</span>
+                            </div>
+                          </td>
+                          <td className="p-2 border-b text-gray-500">{r.email}</td>
+                          <td className="p-2 border-b text-center text-gray-500">
+                            {r.deletedAt?.toDate().toLocaleDateString('ja-JP') || '-'}
+                          </td>
+                          <td className="p-2 border-b text-center">
+                            <button
+                              onClick={() => removeFromOrg(r.uid, r.displayName)}
+                              disabled={removing === r.uid}
+                              className={`px-3 py-1 rounded text-sm ${removing === r.uid ? 'bg-gray-300 text-gray-500' : 'bg-red-600 text-white hover:bg-red-700'}`}
+                            >{removing === r.uid ? '削除中' : '完全削除'}</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </>
         )}
 
