@@ -173,37 +173,22 @@ export default function OrganizationMembersPage() {
 
   const removeFromOrg = async (uid: string, displayName: string) => {
     if (!orgId) return;
-    if (!confirm(`${displayName} を完全に削除しますか？\n\n※ ユーザーアカウント自体も削除され、ログインできなくなります。\n※ 過去のシフトやタイムカードは記録として残ります。`)) return;
+    if (!confirm(`${displayName} をこの組織から削除しますか？\n\n※ ユーザーはこの組織にアクセスできなくなります。\n※ 過去のシフトやタイムカードは記録として残ります。`)) return;
     
     setRemoving(uid);
     try {
-      // API経由で削除（Admin SDKを使用）
-      const response = await fetch('/api/admin/delete-user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          targetUid: uid,
-          adminUid: userProfile?.uid,
-          organizationId: orgId,
-        }),
+      // ユーザーのorganizationIdsからこの組織のIDを削除
+      const userRef = doc(db, 'users', uid);
+      await updateDoc(userRef, {
+        organizationIds: arrayRemove(orgId)
       });
-
-      const result = await response.json();
-      
-      if (!response.ok) {
-        // Firebase Admin SDK未設定の場合のエラー処理
-        if (result.error?.includes('Firebase Admin SDK')) {
-          throw new Error('ユーザー削除機能を使用するには、Firebase Admin SDKの設定が必要です。\n\n開発環境では、.env.localに以下を設定してください:\n- FIREBASE_CLIENT_EMAIL\n- FIREBASE_PRIVATE_KEY');
-        }
-        throw new Error(result.error || 'ユーザーの削除に失敗しました');
-      }
 
       // UI から削除
       setRows(prev => prev.filter(r => r.uid !== uid));
-      alert('ユーザーを削除しました');
+      alert('ユーザーを組織から削除しました');
     } catch (e: any) {
       console.error('[Members] remove error', e);
-      alert(e.message || 'ユーザーの削除に失敗しました');
+      alert('ユーザーの削除に失敗しました');
     } finally {
       setRemoving(null);
     }
