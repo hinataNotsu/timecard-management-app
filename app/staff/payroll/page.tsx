@@ -557,7 +557,7 @@ export default function PartTimePayrollPage() {
 
       <SubmitTimecardsModal 
         isOpen={submitModal.isOpen}
-        onClose={() => setSubmitModal({ isOpen: false, incompleteCards: [] })}
+        onClose={() => setSubmitModal({ isOpen: false, count: 0, incompleteCards: [] })}
         onConfirm={executeSubmit}
         incompleteCards={submitModal.incompleteCards}
       />
