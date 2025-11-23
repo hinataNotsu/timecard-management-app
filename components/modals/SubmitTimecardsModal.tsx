@@ -7,7 +7,7 @@ interface SubmitTimecardsModalProps {
   onClose: () => void;
   onConfirm: () => void;
   count: number;
-  incompleteList?: string[];
+  incompleteCards?: string[];
 }
 
 export default function SubmitTimecardsModal({
@@ -15,7 +15,7 @@ export default function SubmitTimecardsModal({
   onClose,
   onConfirm,
   count,
-  incompleteList,
+  incompleteCards,
 }: SubmitTimecardsModalProps) {
   return (
     <ConfirmModal
@@ -24,12 +24,12 @@ export default function SubmitTimecardsModal({
       onConfirm={onConfirm}
       title="タイムカードを一括申請"
       message={
-        incompleteList && incompleteList.length > 0 ? (
+        incompleteCards && incompleteCards.length > 0 ? (
           <>
             <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-3 text-left">
               <p className="font-semibold text-yellow-800 mb-1">未完了のタイムカード:</p>
               <div className="text-xs text-yellow-700 max-h-32 overflow-y-auto">
-                {incompleteList.map((item, i) => (
+                {incompleteCards.map((item, i) => (
                   <div key={i}>{item}</div>
                 ))}
               </div>
