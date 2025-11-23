@@ -7,6 +7,7 @@ interface ApproveShiftModalProps {
   onClose: () => void;
   onConfirm: () => void;
   message?: string;
+  shiftsCount?: number;
 }
 
 export default function ApproveShiftModal({
@@ -14,14 +15,19 @@ export default function ApproveShiftModal({
   onClose,
   onConfirm,
   message,
+  shiftsCount,
 }: ApproveShiftModalProps) {
+  const defaultMessage = shiftsCount 
+    ? `${shiftsCount}件のシフト変更を保存します。よろしいですか？`
+    : 'このシフトを承認します。';
+    
   return (
     <ConfirmModal
       isOpen={isOpen}
       onClose={onClose}
       onConfirm={onConfirm}
       title="シフトを承認"
-      message={message || 'このシフトを承認します。'}
+      message={message || defaultMessage}
       confirmLabel="承認する"
       confirmButtonColor="green"
       icon={
