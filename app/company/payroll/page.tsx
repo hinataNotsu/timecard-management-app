@@ -6,6 +6,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { collection, doc, getDoc, getDocs, orderBy, query, where, Timestamp, updateDoc, setDoc } from 'firebase/firestore';
 import JapaneseHolidays from 'japanese-holidays';
 import { db } from '@/lib/firebase';
+import ApproveTimecardModal from '@/components/modals/ApproveTimecardModal';
+import toast from 'react-hot-toast';
 
 interface TimecardRow {
   id: string;
@@ -65,6 +67,10 @@ export default function PayrollPage() {
     breakStartAt: string;
     breakEndAt: string;
   } | null>(null);
+  
+  // モーダル管理
+  const [approveModal, setApproveModal] = useState<{ isOpen: boolean; userId: string }>({ isOpen: false, userId: '' });
+  
   const [orgSettings, setOrgSettings] = useState<{
     defaultHourlyWage: number;
     nightPremiumEnabled: boolean;
@@ -355,9 +361,7 @@ export default function PayrollPage() {
   }, [timecards, orgSettings, memberTransport, userInfoMap]);
 
   // 承認処理
-  // 承認処理
   const handleApprove = async (userId: string) => {
-    if (!confirm('この申請を承認しますか？')) return;
     try {
       const userTimecards = timecards.filter(tc => tc.userId === userId && tc.status === 'pending');
       const now = Timestamp.now();
@@ -385,11 +389,11 @@ export default function PayrollPage() {
       // monthlyReportsに保存/更新（承認後のデータを使用するため、ユーザー情報を渡す）
       await saveMonthlyReport(userId);
       
-      alert('承認が完了しました');
+      toast.success('承認が完了しました');
       window.location.reload();
     } catch (e) {
       console.error('[Payroll] approve error', e);
-      alert('承認に失敗しました');
+      toast.error('承認に失敗しました');
     }
   };
 
@@ -469,11 +473,11 @@ export default function PayrollPage() {
           updatedAt: Timestamp.now(),
         });
       }
-      alert('却下が完了しました');
+      toast.success('却下が完了しました');
       window.location.reload();
     } catch (e) {
       console.error('[Payroll] reject error', e);
-      alert('却下に失敗しました');
+      toast.error('却下に失敗しました');
     }
   };
 
@@ -510,11 +514,11 @@ export default function PayrollPage() {
         });
       }
       
-      alert(`差し戻しが完了しました（${userTimecards.length}件のタイムカードを未承認に戻しました）`);
+      toast.success(`差し戻しが完了しました（${userTimecards.length}件のタイムカードを未承認に戻しました）`);
       window.location.reload();
     } catch (e) {
       console.error('[Payroll] revert error', e);
-      alert('差し戻しに失敗しました');
+      toast.error('差し戻しに失敗しました');
     }
   };
 
@@ -551,13 +555,13 @@ export default function PayrollPage() {
       if (editForm.breakEndAt) updates.breakEndAt = timeToTimestamp(tc.dateKey, editForm.breakEndAt);
 
       await updateDoc(doc(db, 'timecards', editingCardId), updates);
-      alert('更新しました');
+      toast.success('更新しました');
       setEditingCardId(null);
       setEditForm(null);
       window.location.reload();
     } catch (e) {
       console.error('[Payroll] edit error', e);
-      alert('更新に失敗しました');
+      toast.error('更新に失敗しました');
     }
   };
 
@@ -666,14 +670,14 @@ export default function PayrollPage() {
                         ) : (
                           <>
                             <button 
-                              onClick={() => handleApprove(app.userId)} 
+                              onClick={() => setApproveModal({ isOpen: true, userId: app.userId })} 
                               className="px-3 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700"
                             >
                               承認
                             </button>
                             <button 
-                              onClick={() => handleReject(app.userId)} 
-                              className="px-3 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700"
+                              onClick={() => setApproveModal({ isOpen: true, userId: app.userId })} 
+                              className="px-3 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700"
                             >
                               却下
                             </button>
@@ -816,6 +820,13 @@ export default function PayrollPage() {
           </div>
         </div>
       )}
+      
+      {/* モーダル */}
+      <ApproveTimecardModal
+        isOpen={approveModal.isOpen}
+        onClose={() => setApproveModal({ isOpen: false, userId: '' })}
+        onConfirm={() => handleApprove(approveModal.userId)}
+      />
     </div>
   );
 }

@@ -7,6 +7,8 @@ import { collection, doc, serverTimestamp, query, where, getDocs, updateDoc, add
 import { db } from '@/lib/firebase';
 import { Timestamp } from 'firebase/firestore';
 import JapaneseHolidays from 'japanese-holidays';
+import { DeleteShiftModal } from '@/components/modals';
+import toast from 'react-hot-toast';
 
 type ViewMode = 'day' | 'week' | 'month';
 
@@ -48,6 +50,9 @@ export default function ShiftSubmitPage() {
   const [longPressTimer, setLongPressTimer] = useState<NodeJS.Timeout | null>(null);
   const [isLongPressActive, setIsLongPressActive] = useState(false);
   const [resizingShift, setResizingShift] = useState<{ id: string; edge: 'start' | 'end'; originalStart: string; originalEnd: string; startY: number } | null>(null);
+  
+  // モーダル管理
+  const [deleteShiftModal, setDeleteShiftModal] = useState<{ isOpen: boolean; id: string }>({ isOpen: false, id: '' });
 
 
 
@@ -190,21 +195,21 @@ export default function ShiftSubmitPage() {
   // ドラッグで作成したシフトを直接保存
   const saveShiftDirect = async (shift: { date: string; startTime: string; endTime: string }) => {
     if (!userProfile?.uid || !userProfile?.currentOrganizationId) {
-      alert('ユーザーまたは所属組織が特定できません');
+      toast.error('ユーザーまたは所属組織が特定できません');
       return;
     }
 
     const orgId = userProfile.currentOrganizationId;
     const belongs = Array.isArray(userProfile.organizationIds) && userProfile.organizationIds.includes(orgId);
     if (!belongs) {
-      alert('選択中の企業に未所属のためシフトを登録できません。企業IDの参加を完了してください。');
+      toast.error('選択中の企業に未所属のためシフトを登録できません。企業IDの参加を完了してください。');
       router.push('/join-organization');
       return;
     }
 
     // 締切チェック
     if (!canSubmitForDate(new Date(shift.date))) {
-      alert('この日のシフトは締切を過ぎているため追加できません');
+      toast.error('この日のシフトは締切を過ぎているため追加できません');
       return;
     }
 
@@ -215,7 +220,7 @@ export default function ShiftSubmitPage() {
     });
 
     if (hasOverlap) {
-      alert('この時間帯は既にシフトが入っています');
+      toast.error('この時間帯は既にシフトが入っています');
       return;
     }
 
@@ -245,7 +250,7 @@ export default function ShiftSubmitPage() {
       setShifts([...shifts, { ...shift, id: docRef.id, persisted: true, status: 'pending', note: '' }]);
     } catch (e) {
       console.error('[Shift Submit] ドラッグでのシフト作成失敗:', e);
-      alert('シフトの追加に失敗しました');
+      toast.error('シフトの追加に失敗しました');
     }
   };
 
@@ -309,7 +314,7 @@ export default function ShiftSubmitPage() {
       // 締切チェック：対象のシフトの日付を取得
       const targetShift = shifts.find(s => s.id === resizingShift.id);
       if (targetShift && !canSubmitForDate(new Date(targetShift.date))) {
-        alert('この日のシフトは締切を過ぎているため変更できません');
+        toast.error('この日のシフトは締切を過ぎているため変更できません');
         setResizingShift(null);
         return;
       }
@@ -358,7 +363,7 @@ export default function ShiftSubmitPage() {
       // 締切チェック：対象のシフトの日付を取得
       const targetShift = shifts.find(s => s.id === resizingShift.id);
       if (targetShift && !canSubmitForDate(new Date(targetShift.date))) {
-        alert('この日のシフトは締切を過ぎているため変更できません');
+        toast.error('この日のシフトは締切を過ぎているため変更できません');
         setResizingShift(null);
         return;
       }
@@ -558,7 +563,7 @@ export default function ShiftSubmitPage() {
   // シフト保存（即座にFirestoreへ）
   const handleSaveShift = async () => {
     if (!userProfile?.uid || !userProfile?.currentOrganizationId) {
-      alert('ユーザーまたは所属組織が特定できません');
+      toast.error('ユーザーまたは所属組織が特定できません');
       return;
     }
 
@@ -566,7 +571,7 @@ export default function ShiftSubmitPage() {
     const orgId = userProfile.currentOrganizationId;
     const belongs = Array.isArray(userProfile.organizationIds) && userProfile.organizationIds.includes(orgId);
     if (!belongs) {
-      alert('選択中の企業に未所属のためシフトを登録できません。企業IDの参加を完了してください。');
+      toast.error('選択中の企業に未所属のためシフトを登録できません。企業IDの参加を完了してください。');
       router.push('/join-organization');
       return;
     }
@@ -575,13 +580,13 @@ export default function ShiftSubmitPage() {
 
     // 時間の妥当性チェック
     if (newShift.startTime >= newShift.endTime) {
-      alert('終了時刻は開始時刻より後にしてください');
+      toast.error('終了時刻は開始時刻より後にしてください');
       return;
     }
 
     // 締切チェック
     if (!canSubmitForDate(new Date(newShift.date))) {
-      alert('この日のシフトは締切を過ぎているため追加できません');
+      toast.error('この日のシフトは締切を過ぎているため追加できません');
       return;
     }
 
@@ -592,7 +597,7 @@ export default function ShiftSubmitPage() {
     });
 
     if (hasOverlap) {
-      alert('この時間帯は既にシフトが入っています');
+      toast.error('この時間帯は既にシフトが入っています');
       return;
     }
 
@@ -640,7 +645,7 @@ export default function ShiftSubmitPage() {
       });
     } catch (e) {
       console.error('[Debug] Shift creation failed:', e);
-      alert('シフトの追加に失敗しました');
+      toast.error('シフトの追加に失敗しました');
     }
   };
 
@@ -650,19 +655,19 @@ export default function ShiftSubmitPage() {
     if (!newShift.date || !newShift.startTime || !newShift.endTime) return;
 
     if (newShift.startTime >= newShift.endTime) {
-      alert('終了時刻は開始時刻より後にしてください');
+      toast.error('終了時刻は開始時刻より後にしてください');
       return;
     }
 
     const dateShifts = getShiftsForDate(newShift.date).filter((s) => s.id !== editingId);
     const hasOverlap = dateShifts.some((s) => !(newShift.endTime <= s.startTime || newShift.startTime >= s.endTime));
     if (hasOverlap) {
-      alert('この時間帯は既にシフトが入っています');
+      toast.error('この時間帯は既にシフトが入っています');
       return;
     }
 
     if (!canSubmitForDate(new Date(newShift.date))) {
-      alert('この日のシフトは締切を過ぎているため更新できません');
+      toast.error('この日のシフトは締切を過ぎているため更新できません');
       return;
     }
 
@@ -672,7 +677,7 @@ export default function ShiftSubmitPage() {
       if (target?.persisted) {
         // 承認済み・却下済みは編集不可
         if (target.status && target.status !== 'pending') {
-          alert('このシフトは承認済みまたは却下済みのため編集できません');
+          toast.error('このシフトは承認済みまたは却下済みのため編集できません');
           return;
         }
         const [y, m, d] = newShift.date.split('-').map((v) => parseInt(v, 10));
@@ -693,7 +698,7 @@ export default function ShiftSubmitPage() {
       setEditingId(null);
     } catch (e) {
       console.error(e);
-      alert('更新に失敗しました');
+      toast.error('更新に失敗しました');
       // Firestore失敗時はサーバー状態を優先し再読込
       await loadMonthShifts(currentDate);
     }
@@ -706,16 +711,14 @@ export default function ShiftSubmitPage() {
 
     // 承認済み・却下済みのシフトは削除不可
     if (shift.status === 'approved' || shift.status === 'rejected') {
-      alert('このシフトは承認済みまたは却下済みのため削除できません');
+      toast.error('このシフトは承認済みまたは却下済みのため削除できません');
       return;
     }
 
     if (!canSubmitForDate(new Date(shift.date))) {
-      alert('この日のシフトは締切を過ぎているため削除できません');
+      toast.error('この日のシフトは締切を過ぎているため削除できません');
       return;
     }
-
-    if (!confirm('このシフトを削除しますか？')) return;
 
     try {
       if (shift.persisted) {
@@ -734,7 +737,7 @@ export default function ShiftSubmitPage() {
       });
     } catch (e) {
       console.error(e);
-      alert('シフトの削除に失敗しました');
+      toast.error('シフトの削除に失敗しました');
     }
   };
 
@@ -1431,7 +1434,7 @@ export default function ShiftSubmitPage() {
                       const canDelete = shift && shift.status !== 'approved' && shift.status !== 'rejected';
                       return canDelete ? (
                         <button
-                          onClick={() => handleDeleteShift(editingId)}
+                          onClick={() => { if (editingId) setDeleteShiftModal({ isOpen: true, id: editingId }); }}
                           className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
                         >
                           削除
@@ -1466,6 +1469,16 @@ export default function ShiftSubmitPage() {
             </div>
           </div>
         )}
+
+        <DeleteShiftModal 
+          isOpen={deleteShiftModal.isOpen}
+          onClose={() => setDeleteShiftModal({ isOpen: false, id: null })}
+          onConfirm={() => {
+            if (deleteShiftModal.id) {
+              deleteShift(deleteShiftModal.id);
+            }
+          }}
+        />
       </div>
     </div>
   );

@@ -170,7 +170,7 @@ export default function TimecardPage() {
       } catch (error: any) {
         console.error('Error loading record:', error);
         if (error.message?.includes('5回')) {
-          alert(error.message);
+          toast.error(error.message);
         }
       } finally {
         setLoading(false);
@@ -202,7 +202,7 @@ export default function TimecardPage() {
       }
     } catch (error: any) {
       console.error('Error updating field:', error);
-      alert(error.message || '打刻に失敗しました。もう一度お試しください。');
+      toast.error(error.message || '打刻に失敗しました。もう一度お試しください。');
     }
   };
 

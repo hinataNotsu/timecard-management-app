@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { doc, getDoc, updateDoc, deleteDoc, Timestamp } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
 import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
+import toast from 'react-hot-toast';
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -75,11 +76,11 @@ export default function ProfilePage() {
   const save = async () => {
     if (!userProfile) return;
     if (!displayName.trim()) {
-      alert('表示名を入力してください');
+      toast.error('表示名を入力してください');
       return;
     }
     if (displayName.trim().length > 20) {
-      alert('表示名は20文字以内で入力してください');
+      toast.error('表示名は20文字以内で入力してください');
       return;
     }
     setSaving(true);
@@ -92,7 +93,7 @@ export default function ProfilePage() {
         ...(isOnboarding ? { profileCompleted: true } : {}),
         updatedAt: Timestamp.now(),
       } as any);
-      alert(isOnboarding ? 'プロフィール登録が完了しました' : '保存しました');
+      toast.success(isOnboarding ? 'プロフィール登録が完了しました' : '保存しました');
       if (isOnboarding) {
         router.push('/staff/dashboard');
       } else {
@@ -100,7 +101,7 @@ export default function ProfilePage() {
       }
     } catch (e) {
       console.error('[Profile] save error', e);
-      alert('保存に失敗しました');
+      toast.error('保存に失敗しました');
     } finally {
       setSaving(false);
     }
@@ -110,17 +111,17 @@ export default function ProfilePage() {
     if (!auth.currentUser || !userProfile) return;
     
     if (!currentPassword || !newPassword || !confirmNewPassword) {
-      alert('全ての項目を入力してください');
+      toast.error('全ての項目を入力してください');
       return;
     }
     
     if (newPassword !== confirmNewPassword) {
-      alert('新しいパスワードが一致しません');
+      toast.error('新しいパスワードが一致しません');
       return;
     }
     
     if (newPassword.length < 6) {
-      alert('パスワードは6文字以上で入力してください');
+      toast.error('パスワードは6文字以上で入力してください');
       return;
     }
     
@@ -139,7 +140,7 @@ export default function ProfilePage() {
         updatedAt: Timestamp.now(),
       });
       
-      alert('パスワードを変更しました');
+      toast.success('パスワードを変更しました');
       if (isOnboarding) {
         // 次はプロフィール登録へ
         setOnboardingStep('profile');
@@ -160,11 +161,11 @@ export default function ProfilePage() {
     } catch (e: any) {
       console.error('[Profile] password change error', e);
       if (e.code === 'auth/wrong-password') {
-        alert('現在のパスワードが正しくありません');
+        toast.error('現在のパスワードが正しくありません');
       } else if (e.code === 'auth/too-many-requests') {
-        alert('試行回数が多すぎます。しばらく待ってから再度お試しください');
+        toast.error('試行回数が多すぎます。しばらく待ってから再度お試しください');
       } else {
-        alert('パスワードの変更に失敗しました');
+        toast.error('パスワードの変更に失敗しました');
       }
     } finally {
       setChangingPassword(false);
@@ -371,7 +372,7 @@ export default function ProfilePage() {
                       const url = new URL(window.location.href);
                       url.searchParams.delete('passwordChangeRequired');
                       window.history.replaceState({}, '', url.toString());
-                      alert('パスワード変更をスキップしました。');
+                      toast('パスワード変更をスキップしました。');
                     }}
                     className="px-4 py-2 rounded bg-gray-200 text-gray-700 hover:bg-gray-300"
                   >

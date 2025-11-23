@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { collection, doc, getDoc, query, where, Timestamp, setDoc, updateDoc, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import toast from 'react-hot-toast';
 
 interface TimecardRecord {
   id: string;
@@ -208,7 +209,7 @@ export default function TimecardPage() {
       setRecord(next);
     } catch (e) {
       console.error('[Timecard] update error', e);
-      alert('打刻に失敗しました');
+      toast.error('打刻に失敗しました');
     }
   };
 

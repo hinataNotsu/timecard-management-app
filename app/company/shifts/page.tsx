@@ -7,6 +7,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { collection, doc, getDoc, getDocs, query, where, orderBy, updateDoc, addDoc, Timestamp as FirestoreTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Timestamp } from 'firebase/firestore';
+import { ApproveShiftModal, DeleteLabelModal } from '@/components/modals';
+import toast from 'react-hot-toast';
 
 interface ShiftLabel {
   id: string;
@@ -64,6 +66,10 @@ export default function AdminShiftListPage() {
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [editingLabelName, setEditingLabelName] = useState('');
   const [editingLabelColor, setEditingLabelColor] = useState('#8b5cf6');
+  
+  // モーダル管理
+  const [approveShiftModalData, setApproveShiftModalData] = useState<{ isOpen: boolean; message?: string; outOfRangeShifts?: any[] }>({ isOpen: false });
+  const [deleteLabelModalData, setDeleteLabelModalData] = useState<{ isOpen: boolean; labelId: string; labelName: string }>({ isOpen: false, labelId: '', labelName: '' });
   
   const availableColors = [
     { name: '紫', value: '#8b5cf6' },
@@ -328,18 +334,15 @@ export default function AdminShiftListPage() {
     // 希望時間外のシフトがあれば確認
     if (outOfRangeShifts.length > 0) {
       const message = `以下のシフトが希望外の時間を含んでいます。保存してよろしいですか？\n\n${outOfRangeShifts.map(s => `${s.userName} (${s.original} → ${s.modified})`).join('\n')}`;
-      if (!confirm(message)) {
-        // キャンセルされた場合、希望時間外のシフトの編集を取り消す（元の時間に戻す）
-        const newEditedShifts = new Map(editedShifts);
-        for (const item of outOfRangeShifts) {
-          // 編集を削除することで、元の時間（shift.startTime, shift.endTime）が表示される
-          newEditedShifts.delete(item.shiftId);
-        }
-        setEditedShifts(newEditedShifts);
-        return;
-      }
+      setApproveShiftModalData({ isOpen: true, message, outOfRangeShifts });
+      return;
     }
     
+    await executeSave();
+  };
+  
+  // 実際の保存処理
+  const executeSave = async () => {
     setSaving(true);
     try {
       for (const [shiftId, times] of editedShifts.entries()) {
@@ -354,12 +357,32 @@ export default function AdminShiftListPage() {
       if (selectedDay) {
         await fetchDayShifts(selectedDay);
       }
-      alert('シフトを保存しました');
+      toast.success('シフトを保存しました');
     } catch (error) {
       console.error('Save error:', error);
-      alert('保存に失敗しました');
+      toast.error('保存に失敗しました');
     } finally {
       setSaving(false);
+    }
+  };
+  
+  // ラベル削除の実行処理
+  const executeDeleteLabel = async (labelId: string) => {
+    const updatedLabels = shiftLabels.filter(l => l.id !== labelId);
+    setShiftLabels(updatedLabels);
+    // Firestoreに保存
+    if (userProfile?.currentOrganizationId) {
+      try {
+        await updateDoc(doc(db, 'organizations', userProfile.currentOrganizationId), {
+          shiftLabels: updatedLabels
+        });
+      } catch (e) {
+        console.error('ラベルの削除に失敗:', e);
+      }
+    }
+    // 選択中の日付のシフトを再読み込みして表示を更新
+    if (selectedDay) {
+      fetchDayShifts(selectedDay);
     }
   };
 
@@ -527,7 +550,7 @@ export default function AdminShiftListPage() {
       } as any);
       setShifts(prev => prev.map(s => s.id === id ? { ...s, status: 'approved', approvedByName: userProfile.displayName || s.approvedByName || '', approvedAt: new Date(), rejectReason: null } : s));
     } catch (e) {
-      alert('承認に失敗しました');
+      toast.error('承認に失敗しました');
       console.error(e);
     }
   };
@@ -544,7 +567,7 @@ export default function AdminShiftListPage() {
       } as any);
       setShifts(prev => prev.map(s => s.id === id ? { ...s, status: 'rejected', approvedByName: null, approvedAt: null, rejectReason: reason || '' } : s));
     } catch (e) {
-      alert('却下に失敗しました');
+      toast.error('却下に失敗しました');
       console.error(e);
     }
   };
@@ -681,7 +704,7 @@ export default function AdminShiftListPage() {
                     <div className="flex items-center gap-2">
                       {editedShifts.size > 0 && (
                         <button
-                          onClick={saveChanges}
+                          onClick={() => setApproveShiftModalData({ isOpen: true, shiftsCount: editedShifts.size })}
                           disabled={saving}
                           className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm font-semibold"
                         >
@@ -1090,7 +1113,7 @@ export default function AdminShiftListPage() {
                                   key={label.id}
                                   onClick={async () => {
                                     if (!splitTime || splitTime <= editModalTime.startTime || splitTime >= editModalTime.endTime) {
-                                      alert('有効な分割時刻を入力してください');
+                                      toast.error('有効な分割時刻を入力してください');
                                       return;
                                     }
                                     
@@ -1134,10 +1157,10 @@ export default function AdminShiftListPage() {
                                       setEditingShiftId(null);
                                       setEditingShift(null);
                                       await fetchDayShifts(selectedDay!);
-                                      alert('前半を「' + label.name + '」に設定しました。後半のラベルも設定してください。');
+                                      toast('前半を「' + label.name + '」に設定しました。後半のラベルも設定してください。');
                                     } catch (e) {
                                       console.error('Split failed', e);
-                                      alert('分割に失敗しました');
+                                      toast.error('分割に失敗しました');
                                     }
                                   }}
                                   className="w-full px-3 py-2 rounded text-sm font-medium text-white"
@@ -1194,7 +1217,7 @@ export default function AdminShiftListPage() {
                       setEditingShiftId(null);
                       setEditingShift(null);
                     } else {
-                      alert('開始時刻と終了時刻を入力してください');
+                      toast.error('開始時刻と終了時刻を入力してください');
                     }
                   }}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
@@ -1230,25 +1253,8 @@ export default function AdminShiftListPage() {
                     編集
                   </button>
                   <button
-                    onClick={async () => {
-                      if (confirm(`「${label.name}」を削除しますか？`)) {
-                        const updatedLabels = shiftLabels.filter(l => l.id !== label.id);
-                        setShiftLabels(updatedLabels);
-                        // Firestoreに保存
-                        if (userProfile?.currentOrganizationId) {
-                          try {
-                            await updateDoc(doc(db, 'organizations', userProfile.currentOrganizationId), {
-                              shiftLabels: updatedLabels
-                            });
-                          } catch (e) {
-                            console.error('ラベルの削除に失敗:', e);
-                          }
-                        }
-                        // 選択中の日付のシフトを再読み込みして表示を更新
-                        if (selectedDay) {
-                          fetchDayShifts(selectedDay);
-                        }
-                      }
+                    onClick={() => {
+                      setDeleteLabelModalData({ isOpen: true, labelId: label.id, labelName: label.name });
                     }}
                     className="px-3 py-1 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded"
                   >
@@ -1302,7 +1308,7 @@ export default function AdminShiftListPage() {
                   <button
                     onClick={async () => {
                       if (!editingLabelName.trim()) {
-                        alert('名称を入力してください');
+                        toast.error('名称を入力してください');
                         return;
                       }
                       
@@ -1362,6 +1368,20 @@ export default function AdminShiftListPage() {
           </div>
         </div>
       )}
+
+      <ApproveShiftModal 
+        isOpen={approveShiftModalData.isOpen}
+        onClose={() => setApproveShiftModalData({ isOpen: false, shiftsCount: 0 })}
+        onConfirm={executeSave}
+        shiftsCount={approveShiftModalData.shiftsCount}
+      />
+
+      <DeleteLabelModal 
+        isOpen={deleteLabelModalData.isOpen}
+        onClose={() => setDeleteLabelModalData({ isOpen: false, labelId: '', labelName: '' })}
+        onConfirm={executeDeleteLabel}
+        labelName={deleteLabelModalData.labelName}
+      />
     </div>
   );
 }

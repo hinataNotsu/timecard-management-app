@@ -6,6 +6,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { collection, query, where, getDocs, doc, updateDoc, deleteDoc, Timestamp, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Timecard } from '@/types';
+import { DeleteTimecardModal } from '@/components/modals';
+import toast from 'react-hot-toast';
 
 interface TimecardRow {
   id: string;
@@ -33,6 +35,9 @@ export default function TimecardsPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
+  
+  // モーダル管理
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; id: string; userName: string }>({ isOpen: false, id: '', userName: '' });
 
   useEffect(() => {
     if (!loading && (!userProfile || !userProfile.isManage)) {
@@ -180,26 +185,24 @@ export default function TimecardsPage() {
         } : tc
       ));
 
-      alert('保存しました');
+      toast.success('保存しました');
     } catch (error) {
       console.error('[Timecards] Error saving timecard:', error);
-      alert('保存に失敗しました');
+      toast.error('保存に失敗しました');
     } finally {
       setSaving(null);
     }
   };
 
   const deleteTimecard = async (id: string, userName: string) => {
-    if (!confirm(`${userName}のタイムカードを削除しますか？`)) return;
-
     setDeleting(id);
     try {
       await deleteDoc(doc(db, 'timecards', id));
       setTimecards(prev => prev.filter(tc => tc.id !== id));
-      alert('削除しました');
+      toast.success('削除しました');
     } catch (error) {
       console.error('[Timecards] Error deleting timecard:', error);
-      alert('削除に失敗しました');
+      toast.error('削除に失敗しました');
     } finally {
       setDeleting(null);
     }
@@ -407,7 +410,7 @@ export default function TimecardsPage() {
                               編集
                             </button>
                             <button
-                              onClick={() => deleteTimecard(tc.id, tc.userName)}
+                              onClick={() => setDeleteModal({ isOpen: true, id: tc.id, userName: tc.userName })}
                               disabled={deleting === tc.id}
                               className={`px-2 py-1 rounded text-xs ${
                                 deleting === tc.id
@@ -433,6 +436,13 @@ export default function TimecardsPage() {
           <p>※ 退勤時刻を変更すると労働時間と給与が自動で再計算されます</p>
         </div>
       </div>
+
+      <DeleteTimecardModal 
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ isOpen: false, id: '', userName: '' })}
+        onConfirm={() => deleteTimecard(deleteModal.id, deleteModal.userName)}
+        userName={deleteModal.userName}
+      />
     </div>
   );
 }

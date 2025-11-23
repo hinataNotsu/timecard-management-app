@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { collection, query, where, getDocs, Timestamp, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import JapaneseHolidays from 'japanese-holidays';
+import toast from 'react-hot-toast';
 
 interface UserReport {
   userId: string;
@@ -234,7 +235,7 @@ export default function ReportPage() {
       setSelectedUserId(userId);
     } catch (e) {
       console.error('[Report] Failed to load user timecards', e);
-      alert('タイムカードの読み込みに失敗しました');
+      toast.error('タイムカードの読み込みに失敗しました');
     }
   };
 

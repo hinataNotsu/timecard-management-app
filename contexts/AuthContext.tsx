@@ -11,6 +11,7 @@ import {
 import { doc, getDoc, setDoc, Timestamp, collection, addDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { User } from '@/types';
+import toast from 'react-hot-toast';
 
 interface AuthContextType {
   user: FirebaseUser | null;
@@ -44,7 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (profile.deleted) {
             console.warn('[AuthContext] User account is deleted');
             await firebaseSignOut(auth);
-            alert('このアカウントは削除されています');
+            toast.error('このアカウントは削除されています');
             setUserProfile(null);
             setLoading(false);
             return;
@@ -56,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.error('[AuthContext] User profile not found in Firestore for uid:', firebaseUser.uid);
           // Firestoreにドキュメントがない場合はログアウト
           await firebaseSignOut(auth);
-          alert('ユーザー情報が見つかりません。管理者に連絡してください。');
+          toast.error('ユーザー情報が見つかりません。管理者に連絡してください。');
           setUserProfile(null);
         }
       } else {

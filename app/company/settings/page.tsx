@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Organization } from '@/types';
+import toast from 'react-hot-toast';
 
 type OrgPaySettings = Pick<
   Organization,
@@ -109,52 +110,52 @@ export default function OrganizationSettingsPage() {
     if (!canEdit) return;
     // バリデーション
     if (settings.defaultHourlyWage <= 0) {
-      alert('時給は1以上を入力してください');
+      toast.error('時給は1以上を入力してください');
       return;
     }
     if (settings.nightPremiumEnabled) {
       if (settings.nightPremiumRate < 0 || settings.nightPremiumRate > 2) {
-        alert('深夜割増率は0〜2の範囲で指定してください（例: 0.25 = 25%）');
+        toast.error('深夜割増率は0〜2の範囲で指定してください（例: 0.25 = 25%）');
         return;
       }
       const hhmm = /^\d{2}:\d{2}$/;
       if (!hhmm.test(settings.nightStart) || !hhmm.test(settings.nightEnd)) {
-        alert('深夜時間はHH:mm形式で入力してください');
+        toast.error('深夜時間はHH:mm形式で入力してください');
         return;
       }
     }
     if (settings.overtimePremiumEnabled) {
       if (settings.overtimePremiumRate < 0 || settings.overtimePremiumRate > 2) {
-        alert('残業割増率は0〜2の範囲で指定してください');
+        toast.error('残業割増率は0〜2の範囲で指定してください');
         return;
       }
       if (settings.overtimeDailyThresholdMinutes < 0 || settings.overtimeDailyThresholdMinutes > 1440) {
-        alert('残業閾値（分）は0〜1440の範囲で指定してください');
+        toast.error('残業閾値（分）は0〜1440の範囲で指定してください');
         return;
       }
     }
     if (settings.holidayPremiumEnabled) {
       if (settings.holidayPremiumRate < 0 || settings.holidayPremiumRate > 2) {
-        alert('休日割増率は0〜2の範囲で指定してください');
+        toast.error('休日割増率は0〜2の範囲で指定してください');
         return;
       }
     }
     if (settings.transportAllowanceEnabled) {
       if (settings.transportAllowancePerShift < 0) {
-        alert('交通費は0以上で指定してください');
+        toast.error('交通費は0以上で指定してください');
         return;
       }
     }
     // シフト提出ルールのバリデーション
     if (shiftSubmissionCycle === 'weekly' || shiftSubmissionCycle === 'biweekly') {
       if (weeklyDeadlineDaysBefore < 1 || weeklyDeadlineDaysBefore > 30) {
-        alert('締切日数は1〜30の範囲で指定してください');
+        toast.error('締切日数は1〜30の範囲で指定してください');
         return;
       }
     }
     if (shiftSubmissionCycle === 'monthly') {
       if (monthlyDeadlineDay < 1 || monthlyDeadlineDay > 31) {
-        alert('締切日は1〜31の範囲で指定してください');
+        toast.error('締切日は1〜31の範囲で指定してください');
         return;
       }
     }
@@ -191,7 +192,7 @@ export default function OrganizationSettingsPage() {
       router.push('/company/dashboard');
     } catch (e) {
       console.error('[Org Settings] save error', e);
-      alert('保存に失敗しました');
+      toast.error('保存に失敗しました');
     } finally {
       setSaving(false);
     }

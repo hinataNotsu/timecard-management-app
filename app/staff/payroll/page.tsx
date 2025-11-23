@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { collection, doc, getDoc, getDocs, orderBy, query, where, Timestamp, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import JapaneseHolidays from 'japanese-holidays';
+import { SubmitTimecardsModal } from '@/components/modals';
+import toast from 'react-hot-toast';
 
 interface TimecardRow {
   id: string;
@@ -28,6 +30,9 @@ export default function PartTimePayrollPage() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // モーダル管理
+  const [submitModal, setSubmitModal] = useState<{ isOpen: boolean; count: number; incompleteList?: string[] }>({ isOpen: false, count: 0 });
   const [timecards, setTimecards] = useState<TimecardRow[]>([]);
   const [orgSettings, setOrgSettings] = useState<{
     defaultHourlyWage: number;
@@ -262,7 +267,7 @@ export default function PartTimePayrollPage() {
     if (!userProfile?.uid || !userProfile.currentOrganizationId) return;
     
     if (completedDraftCards.length === 0) {
-      alert('申請可能なタイムカードがありません。出勤・退勤が完了しているタイムカードのみ申請できます。');
+      toast.error('申請可能なタイムカードがありません。出勤・退勤が完了しているタイムカードのみ申請できます。');
       return;
     }
     
@@ -281,14 +286,23 @@ export default function PartTimePayrollPage() {
         return `${card.dateKey}: ${issues.join('、')}`;
       });
       
-      if (!confirm(`以下のタイムカードは未完了のため申請されません:\n\n${incompleteList.join('\n')}\n\n完了済みの${completedDraftCards.length}件のタイムカードを申請しますか？`)) {
-        return;
-      }
+      // モーダルで確認するため、ここではreturnしない
+      setSubmitModal({ isOpen: true, count: completedDraftCards.length, incompleteList });
+      return;
     } else {
-      if (!confirm(`${completedDraftCards.length}件のタイムカードを一括申請しますか？`)) {
-        return;
-      }
+      setSubmitModal({ isOpen: true, count: completedDraftCards.length });
+      return;
     }
+  };
+  
+  // 実際の申請処理
+  const executeSubmit = async () => {
+    const completedDraftCards = timecards.filter(t => {
+      if (t.status !== 'draft') return false;
+      if (!t.clockInAt || !t.clockOutAt) return false;
+      if (t.breakStartAt && !t.breakEndAt) return false;
+      return true;
+    });
     
     try {
       // 完了済みのドラフトカードのみを申請
@@ -299,12 +313,12 @@ export default function PartTimePayrollPage() {
         });
       }
       
-      alert(`${completedDraftCards.length}件の申請が完了しました`);
+      toast.success(`${completedDraftCards.length}件の申請が完了しました`);
       // リロード
       window.location.reload();
     } catch (e) {
       console.error('[Payroll] bulk submit error', e);
-      alert('申請に失敗しました');
+      toast.error('申請に失敗しました');
     }
   };
 
@@ -540,6 +554,13 @@ export default function PartTimePayrollPage() {
           )}
         </div>
       </div>
+
+      <SubmitTimecardsModal 
+        isOpen={submitModal.isOpen}
+        onClose={() => setSubmitModal({ isOpen: false, incompleteCards: [] })}
+        onConfirm={executeSubmit}
+        incompleteCards={submitModal.incompleteCards}
+      />
     </div>
   );
 }

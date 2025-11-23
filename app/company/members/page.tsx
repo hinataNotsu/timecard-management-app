@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { collection, doc, getDoc, getDocs, query, updateDoc, where, setDoc, deleteDoc, Timestamp, arrayRemove, arrayUnion } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import RetireMemberModal from '@/components/modals/RetireMemberModal';
+import toast from 'react-hot-toast';
 
 interface MemberRow {
   uid: string;
@@ -13,8 +15,6 @@ interface MemberRow {
   avatarBgColor?: string;
   transportAllowancePerShift?: number;
   hourlyWage?: number;
-  deleted?: boolean;
-  deletedAt?: Timestamp;
 }
 
 interface Request {
@@ -44,6 +44,9 @@ export default function OrganizationMembersPage() {
   // 申請一覧用のstate
   const [requests, setRequests] = useState<Request[]>([]);
   const [requestsLoading, setRequestsLoading] = useState(true);
+  
+  // モーダル管理
+  const [retireModal, setRetireModal] = useState<{ isOpen: boolean; uid: string; name: string }>({ isOpen: false, uid: '', name: '' });
   
   // ...existing code...
 
@@ -119,8 +122,6 @@ export default function OrganizationMembersPage() {
             avatarBgColor: u.avatarBackgroundColor,
             transportAllowancePerShift: settings?.transport,
             hourlyWage: settings?.wage,
-            deleted: memberData?.deleted || false,
-            deletedAt: memberData?.deletedAt,
           };
         }).sort((a, b) => (a.displayName || a.email).localeCompare(b.displayName || b.email));
 
@@ -170,7 +171,7 @@ export default function OrganizationMembersPage() {
       );
     } catch (e) {
       console.error('[Members] save error', e);
-      alert('保存に失敗しました');
+      toast.error('保存に失敗しました');
     } finally {
       setSaving(null);
     }
@@ -178,48 +179,22 @@ export default function OrganizationMembersPage() {
 
   const markAsRetired = async (uid: string, displayName: string) => {
     if (!orgId) return;
-    if (!confirm(`${displayName} をこの組織で退職済みにしますか？\n\n※ この組織でのアクセスができなくなります\n※ 他の組織には影響しません\n※ 過去のシフトやタイムカードは記録として残ります`)) return;
-    
-    setRemoving(uid);
-    try {
-      // membersサブコレクションにdeleted: trueを設定
-      await updateDoc(doc(db, 'organizations', orgId, 'members', uid), {
-        deleted: true,
-        deletedAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      });
-
-      // UIを更新
-      setRows(prev => prev.map(r => 
-        r.uid === uid ? { ...r, deleted: true, deletedAt: Timestamp.now() } : r
-      ));
-      alert('退職処理が完了しました');
-    } catch (e: any) {
-      console.error('[Members] retire error', e);
-      alert('退職処理に失敗しました');
-    } finally {
-      setRemoving(null);
-    }
-  };
-
-  const removeFromOrg = async (uid: string, displayName: string) => {
-    if (!orgId) return;
-    if (!confirm(`${displayName} をこの組織から完全に削除しますか？\n\n※ ユーザーは組織メンバーリストから削除されます\n※ 過去のシフトやタイムカードは記録として残ります`)) return;
     
     setRemoving(uid);
     try {
       // ユーザーのorganizationIdsからこの組織のIDを削除
       const userRef = doc(db, 'users', uid);
       await updateDoc(userRef, {
-        organizationIds: arrayRemove(orgId)
+        organizationIds: arrayRemove(orgId),
+        updatedAt: Timestamp.now(),
       });
 
       // UI から削除
       setRows(prev => prev.filter(r => r.uid !== uid));
-      alert('ユーザーを組織から削除しました');
+      toast.success('退職処理が完了しました');
     } catch (e: any) {
-      console.error('[Members] remove error', e);
-      alert('ユーザーの削除に失敗しました');
+      console.error('[Members] retire error', e);
+      toast.error('退職処理に失敗しました');
     } finally {
       setRemoving(null);
     }
@@ -229,12 +204,12 @@ export default function OrganizationMembersPage() {
     if (!orgId || !userProfile?.uid) return;
     
     if (!newUserEmail || !newUserPassword) {
-      alert('メールアドレスとパスワードを入力してください');
+      toast.error('メールアドレスとパスワードを入力してください');
       return;
     }
     
     if (newUserPassword.length < 6) {
-      alert('パスワードは6文字以上で入力してください');
+      toast.error('パスワードは6文字以上で入力してください');
       return;
     }
     
@@ -265,7 +240,7 @@ export default function OrganizationMembersPage() {
         throw new Error(errorMsg + details);
       }
 
-      alert(`ユーザーを作成しました\n\nメール: ${result.email}\n初回ログイン後にパスワード変更を促します。`);
+      toast.success(`ユーザーを作成しました\n\nメール: ${result.email}\n初回ログイン後にパスワード変更を促します。`);
       
       // フォームをリセット
       setNewUserEmail('');
@@ -277,7 +252,7 @@ export default function OrganizationMembersPage() {
       window.location.reload();
     } catch (e: any) {
       console.error('[Members] add user error', e);
-      alert(e.message || 'ユーザーの作成に失敗しました');
+      toast.error(e.message || 'ユーザーの作成に失敗しました');
     } finally {
       setAdding(false);
     }
@@ -301,10 +276,10 @@ export default function OrganizationMembersPage() {
       const newList = permissionList.filter((p: any) => p.uid !== req.uid);
       await updateDoc(orgDocRef, { permissionList: newList });
       setRequests((prev) => prev.filter((r) => r.uid !== req.uid));
-      alert('申請を承認しました');
+      toast.success('申請を承認しました');
     } catch (e) {
       console.error('[Requests] approve error', e);
-      alert('申請の承認に失敗しました');
+      toast.error('申請の承認に失敗しました');
     }
   };
 
@@ -320,10 +295,10 @@ export default function OrganizationMembersPage() {
       const newList = permissionList.filter((p: any) => p.uid !== req.uid);
       await updateDoc(orgDocRef, { permissionList: newList });
       setRequests((prev) => prev.filter((r) => r.uid !== req.uid));
-      alert('申請を削除しました');
+      toast.success('申請を削除しました');
     } catch (e) {
       console.error('[Requests] reject error', e);
-      alert('申請の削除に失敗しました');
+      toast.error('申請の削除に失敗しました');
     }
   };
 
@@ -391,10 +366,10 @@ export default function OrganizationMembersPage() {
                 <tbody>
                     {loading ? (
                       <tr><td className="p-4 text-center" colSpan={7}>読み込み中...</td></tr>
-                    ) : rows.filter(r => !r.deleted).length === 0 ? (
+                    ) : rows.length === 0 ? (
                       <tr><td className="p-4 text-center" colSpan={7}>在籍メンバーがいません</td></tr>
                     ) : (
-                      rows.filter(r => !r.deleted).map((r) => (
+                      rows.map((r) => (
                       <tr key={r.uid} className="hover:bg-gray-50">
                         <td className="p-2 border-b w-12">
                           <img src={avatarUrl(r.avatarSeed || r.displayName || r.uid, r.avatarBgColor)} alt={r.displayName} className="w-8 h-8 rounded-full ring-1 ring-gray-200" />
@@ -438,7 +413,7 @@ export default function OrganizationMembersPage() {
                         </td>
                         <td className="p-2 border-b text-center">
                           <button
-                            onClick={() => markAsRetired(r.uid, r.displayName)}
+                            onClick={() => setRetireModal({ isOpen: true, uid: r.uid, name: r.displayName })}
                             disabled={removing === r.uid}
                             className={`px-3 py-1 rounded text-sm ${removing === r.uid ? 'bg-gray-300 text-gray-500' : 'bg-amber-600 text-white hover:bg-amber-700'}`}
                           >{removing === r.uid ? '処理中' : '退職処理'}</button>
@@ -450,48 +425,6 @@ export default function OrganizationMembersPage() {
                 </table>
               </div>
             </div>
-
-            {/* 退職済みメンバー */}
-            {rows.filter(r => r.deleted).length > 0 && (
-              <div>
-                <h2 className="text-lg font-semibold mb-3 text-gray-600">退職済みメンバー</h2>
-                <div className="bg-gray-50 rounded-lg shadow overflow-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-100">
-                      <tr>
-                        <th className="p-3 border-b text-left">氏名</th>
-                        <th className="p-3 border-b text-left">メールアドレス</th>
-                        <th className="p-3 border-b text-center">退職日</th>
-                        <th className="p-3 border-b text-center">完全削除</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.filter(r => r.deleted).map(r => (
-                        <tr key={r.uid} className="hover:bg-gray-100">
-                          <td className="p-2 border-b">
-                            <div className="flex items-center gap-2">
-                              <img src={avatarUrl(r.avatarSeed || r.displayName, r.avatarBgColor)} alt={r.displayName} className="w-8 h-8 rounded-full" />
-                              <span className="text-gray-500">(退職済み) {r.displayName}</span>
-                            </div>
-                          </td>
-                          <td className="p-2 border-b text-gray-500">{r.email}</td>
-                          <td className="p-2 border-b text-center text-gray-500">
-                            {r.deletedAt?.toDate().toLocaleDateString('ja-JP') || '-'}
-                          </td>
-                          <td className="p-2 border-b text-center">
-                            <button
-                              onClick={() => removeFromOrg(r.uid, r.displayName)}
-                              disabled={removing === r.uid}
-                              className={`px-3 py-1 rounded text-sm ${removing === r.uid ? 'bg-gray-300 text-gray-500' : 'bg-red-600 text-white hover:bg-red-700'}`}
-                            >{removing === r.uid ? '削除中' : '完全削除'}</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
           </>
         )}
 
@@ -534,6 +467,14 @@ export default function OrganizationMembersPage() {
           </div>
         )}
       </div>
+      
+      {/* モーダル */}
+      <RetireMemberModal
+        isOpen={retireModal.isOpen}
+        onClose={() => setRetireModal({ isOpen: false, uid: '', name: '' })}
+        onConfirm={() => markAsRetired(retireModal.uid, retireModal.name)}
+        memberName={retireModal.name}
+      />
     </div>
   );
 }
