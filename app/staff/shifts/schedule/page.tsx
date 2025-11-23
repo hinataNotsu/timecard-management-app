@@ -15,7 +15,31 @@ type ShiftRow = {
   date: Date;
   startTime: string;
   endTime: string;
+  labelId?: string | null;
+  labelName?: string | null;
+  labelColor?: string | null;
 };
+
+type MergedShift = {
+  userId: string;
+  userName: string;
+  avatarSeed?: string;
+  avatarBgColor?: string;
+  date: Date;
+  segments: Array<{
+    startTime: string;
+    endTime: string;
+    labelId?: string | null;
+    labelName?: string | null;
+    labelColor?: string | null;
+  }>;
+};
+
+interface ShiftLabel {
+  id: string;
+  name: string;
+  color: string;
+}
 
 export default function ApprovedSchedulePage() {
   const { userProfile } = useAuth();
@@ -31,6 +55,8 @@ export default function ApprovedSchedulePage() {
   const [onlyMine, setOnlyMine] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const [selectedDayForTimeline, setSelectedDayForTimeline] = useState<Date | null>(null);
+  const [shiftLabels, setShiftLabels] = useState<ShiftLabel[]>([]);
+  const [showLabelLegend, setShowLabelLegend] = useState(true);
 
   useEffect(() => {
     if (!userProfile) return;
@@ -46,6 +72,7 @@ export default function ApprovedSchedulePage() {
       setLoading(true);
       try {
         const orgId = userProfile.currentOrganizationId;
+        
         const y = selectedMonth.getFullYear();
         const m = selectedMonth.getMonth();
         const monthStart = new Date(y, m, 1, 0, 0, 0, 0);
@@ -81,6 +108,21 @@ export default function ApprovedSchedulePage() {
           return info;
         };
 
+        // ラベル情報を取得済みデータとして保持
+        let labelsData: ShiftLabel[] = [];
+        try {
+          const orgSnap = await getDoc(doc(db, 'organizations', orgId));
+          if (orgSnap.exists()) {
+            const orgData = orgSnap.data() as any;
+            if (orgData.shiftLabels && Array.isArray(orgData.shiftLabels)) {
+              labelsData = orgData.shiftLabels;
+              setShiftLabels(orgData.shiftLabels);
+            }
+          }
+        } catch (e) {
+          console.warn('ラベル読み込みエラー:', e);
+        }
+
         const list: ShiftRow[] = [];
         for (const d of snap.docs) {
           const data = d.data() as any;
@@ -89,6 +131,11 @@ export default function ApprovedSchedulePage() {
           const userId = userRefPath.split('/').pop();
           if (!userId) continue;
           const { name: userName, seed: avatarSeed, bgColor: avatarBgColor } = await getUserInfo(userId);
+          
+          // ラベル情報を取得（取得済みのlabelsDataから）
+          const labelId = data.labelId || null;
+          const labelInfo = labelId ? labelsData.find(l => l.id === labelId) : null;
+          
           list.push({
             userId,
             userName,
@@ -97,6 +144,9 @@ export default function ApprovedSchedulePage() {
             date: dateTs.toDate(),
             startTime: data.startTime,
             endTime: data.endTime,
+            labelId,
+            labelName: labelInfo?.name || null,
+            labelColor: labelInfo?.color || null,
           });
         }
         setRows(list);
@@ -148,16 +198,52 @@ export default function ApprovedSchedulePage() {
     });
   }, [rows, nameFilter, onlyMine, userProfile?.uid]);
 
-  const grouped = useMemo(() => {
-    const map = new Map<string, ShiftRow[]>();
+  // 同じ人・同じ日のシフトをマージ
+  const mergedShifts = useMemo(() => {
+    const map = new Map<string, MergedShift>();
     for (const r of filteredRows) {
-      const k = formatDateKey(r.date);
-      const arr = map.get(k) || [];
-      arr.push(r);
-      map.set(k, arr);
+      const key = `${r.userId}_${formatDateKey(r.date)}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.segments.push({
+          startTime: r.startTime,
+          endTime: r.endTime,
+          labelId: r.labelId,
+          labelName: r.labelName,
+          labelColor: r.labelColor,
+        });
+      } else {
+        map.set(key, {
+          userId: r.userId,
+          userName: r.userName,
+          avatarSeed: r.avatarSeed,
+          avatarBgColor: r.avatarBgColor,
+          date: r.date,
+          segments: [{
+            startTime: r.startTime,
+            endTime: r.endTime,
+            labelId: r.labelId,
+            labelName: r.labelName,
+            labelColor: r.labelColor,
+          }],
+        });
+      }
     }
     return map;
   }, [filteredRows]);
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, MergedShift[]>();
+    for (const [_, shift] of mergedShifts) {
+      const k = formatDateKey(shift.date);
+      const arr = map.get(k) || [];
+      // セグメントを開始時刻順にソート
+      shift.segments.sort((a, b) => a.startTime.localeCompare(b.startTime));
+      arr.push(shift);
+      map.set(k, arr);
+    }
+    return map;
+  }, [mergedShifts]);
 
   const exportCsv = () => {
     const y = selectedMonth.getFullYear();
@@ -220,6 +306,34 @@ export default function ApprovedSchedulePage() {
           </div>
         )}
 
+        {/* ラベル凡例 */}
+        {shiftLabels.length > 0 && (
+          <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">シフトラベル</h2>
+              <button
+                onClick={() => setShowLabelLegend(!showLabelLegend)}
+                className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                {showLabelLegend ? '凡例を非表示' : '凡例を表示'}
+              </button>
+            </div>
+            {showLabelLegend && (
+              <div className="flex flex-wrap gap-2">
+                {shiftLabels.map(label => (
+                  <span
+                    key={label.id}
+                    className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white"
+                    style={{ backgroundColor: label.color }}
+                  >
+                    {label.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="bg-white rounded-lg shadow p-4 mb-6 flex flex-wrap items-center gap-3 print:hidden">
           <button onClick={prevMonth} className="px-2 py-1 border rounded">←</button>
           <div className="font-semibold">{selectedMonth.getFullYear()}年 {selectedMonth.getMonth() + 1}月</div>
@@ -258,7 +372,12 @@ export default function ApprovedSchedulePage() {
               const isToday = new Date().toDateString() === day.toDateString();
               const dow = day.getDay();
               const holiday = JapaneseHolidays.isHoliday(day);
-              const list = (grouped.get(key) || []).sort((a,b) => a.startTime.localeCompare(b.startTime));
+              const list = (grouped.get(key) || []).sort((a,b) => {
+                // 最初のセグメントの開始時刻で比較
+                const aStart = a.segments[0]?.startTime || '';
+                const bStart = b.segments[0]?.startTime || '';
+                return aStart.localeCompare(bStart);
+              });
               return (
                 <div
                   key={idx}
@@ -273,16 +392,24 @@ export default function ApprovedSchedulePage() {
                       <>
                         {/* Desktop / wide: show time and name */}
                         <div className="hidden sm:block space-y-1">
-                          {list.map((s, i2) => (
-                            <div key={i2} className="w-full text-left text-xs bg-green-100 text-green-800 px-1 py-0.5 rounded truncate flex items-center gap-1">
-                              <img
-                                src={`https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(s.avatarSeed || s.userName || s.userId)}${s.avatarBgColor ? `&backgroundColor=${encodeURIComponent(s.avatarBgColor)}` : '&backgroundType=gradientLinear'}&radius=50`}
-                                alt={s.userName}
-                                className="w-4 h-4 rounded-full"
-                              />
-                              <span className="truncate">{s.startTime}-{s.endTime} {s.userName}</span>
-                            </div>
-                          ))}
+                          {list.map((s, i2) => {
+                            // 全セグメントの時間範囲を取得
+                            const allTimes = s.segments.map(seg => `${seg.startTime}-${seg.endTime}`).join(', ');
+                            return (
+                              <div key={i2} className="w-full text-left text-xs bg-green-100 text-green-800 px-1 py-0.5 rounded">
+                                <div className="flex items-center gap-1">
+                                  <img
+                                    src={`https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(s.avatarSeed || s.userName || s.userId)}${s.avatarBgColor ? `&backgroundColor=${encodeURIComponent(s.avatarBgColor)}` : '&backgroundType=gradientLinear'}&radius=50`}
+                                    alt={s.userName}
+                                    className="w-4 h-4 rounded-full flex-shrink-0"
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="truncate">{allTimes} {s.userName}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
 
                         {/* Mobile: show avatars only, if many show "他N名" */}
@@ -349,14 +476,14 @@ export default function ApprovedSchedulePage() {
                 <div className="divide-y divide-gray-300 relative z-10">
                   {(() => {
                     const key = formatDateKey(selectedDayForTimeline);
-                    const dayList = (grouped.get(key) || []).sort((a,b) => a.startTime.localeCompare(b.startTime));
+                    const dayList = (grouped.get(key) || []).sort((a,b) => {
+                      const aStart = a.segments[0]?.startTime || '';
+                      const bStart = b.segments[0]?.startTime || '';
+                      return aStart.localeCompare(bStart);
+                    });
                     if (dayList.length === 0) return <div className="text-sm text-gray-500">この日の承認済みシフトはありません</div>;
                     return dayList.map((s, idx) => {
                       const toMin = (t: string) => { const [hh, mm] = t.split(':').map(Number); return hh*60+mm; };
-                      const startMin = toMin(s.startTime);
-                      const endMin = toMin(s.endTime);
-                      const leftPct = (startMin / (24*60)) * 100;
-                      const widthPct = Math.max(1, ((endMin - startMin) / (24*60)) * 100);
                       return (
                         <div key={idx} className="flex items-center gap-4 py-1">
                           <div className="w-24 text-sm flex items-center gap-2">
@@ -365,11 +492,24 @@ export default function ApprovedSchedulePage() {
                           </div>
                           <div className="flex-1 relative">
                             <div className="relative h-10">
-                              {/** shift bar overlay */}
+                              {/** shift bars for each segment */}
                               <div className="absolute top-1 bottom-1 left-0 right-0 pointer-events-none">
-                                <div className="absolute h-full bg-green-500 text-white rounded-md flex items-center px-2 text-xs" style={{ left: `${leftPct}%`, width: `${widthPct}%` }}>
-                                  {s.startTime}-{s.endTime}
-                                </div>
+                                {s.segments.map((seg, segIdx) => {
+                                  const startMin = toMin(seg.startTime);
+                                  const endMin = toMin(seg.endTime);
+                                  const leftPct = (startMin / (24*60)) * 100;
+                                  const widthPct = Math.max(1, ((endMin - startMin) / (24*60)) * 100);
+                                  const bgColor = seg.labelColor || '#10b981';
+                                  return (
+                                    <div 
+                                      key={segIdx}
+                                      className="absolute h-full text-white rounded-md flex items-center justify-center px-2 text-xs font-medium" 
+                                      style={{ left: `${leftPct}%`, width: `${widthPct}%`, backgroundColor: bgColor }}
+                                    >
+                                      <div className="truncate w-full text-center">{seg.startTime}-{seg.endTime}</div>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
                           </div>

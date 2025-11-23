@@ -249,18 +249,36 @@ export default function ShiftSubmitPage() {
     }
   };
 
-  // ドラッグ中のマウス移動とドラッグ終了処理
+  // マウス移動とドラッグ終了処理
   useEffect(() => {
-    if (!isDragging) return;
-    
+    // 分を時刻文字列に変換
+    const minToTime = (min: number): string => {
+      const h = Math.floor(min / 60);
+      const m = min % 60;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    };
+
     const handleMouseMove = (e: MouseEvent) => {
       if (!dragStartInfo) return;
       
-      // pageYを使用してスクロールを考慮した絶対座標で計算
+      // まだドラッグ開始していない場合、5px以上移動したらドラッグ開始
+      if (!isDragging) {
+        const deltaY = Math.abs(e.pageY - dragStartInfo.startY);
+        if (deltaY > 5) {
+          setIsDragging(true);
+          setTempShift({
+            date: dragStartInfo.date,
+            startTime: minToTime(dragStartInfo.startMin),
+            endTime: minToTime(Math.min(dragStartInfo.startMin + 60, 24 * 60))
+          });
+        }
+        return;
+      }
+      
+      // ドラッグ中：tempShiftを更新
       const deltaY = e.pageY - dragStartInfo.startY;
-      // 週表示: 48px/時間、日表示: 64px/時間
       const pixelPerHour = viewMode === 'week' ? 48 : 64;
-      const deltaMin = Math.round((deltaY / pixelPerHour) * 60 / 15) * 15; // 15分単位
+      const deltaMin = Math.round((deltaY / pixelPerHour) * 60 / 15) * 15;
       const endMin = Math.max(dragStartInfo.startMin + 15, dragStartInfo.startMin + deltaMin);
       
       setTempShift({
@@ -271,9 +289,19 @@ export default function ShiftSubmitPage() {
     };
     
     const handleMouseUp = async () => {
-      if (tempShift) {
+      if (isDragging && tempShift) {
         // ドラッグ終了：直接シフトを作成
         await saveShiftDirect(tempShift);
+      } else if (!isDragging && dragStartInfo) {
+        // クリックのみ：ダイアログを開く
+        setSelectedDate(dragStartInfo.date);
+        setNewShift({
+          date: dragStartInfo.date,
+          startTime: minToTime(dragStartInfo.startMin),
+          endTime: minToTime(Math.min(dragStartInfo.startMin + 60, 24 * 60)),
+          note: '',
+        });
+        setIsAddingShift(true);
       }
       setIsDragging(false);
       setDragStartInfo(null);
@@ -286,7 +314,7 @@ export default function ShiftSubmitPage() {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, dragStartInfo, tempShift, viewMode]);
+  }, [isDragging, dragStartInfo, tempShift, viewMode, saveShiftDirect]);
 
   // リサイズ処理
   useEffect(() => {
@@ -503,18 +531,26 @@ export default function ShiftSubmitPage() {
   // ステータスフィルター適用
   const matchesFilter = (s: ShiftEntry) => statusFilter === 'all' || (s.status ?? 'pending') === statusFilter;
 
-  // ステータス別クラス（承認=緑／申請中=灰／却下=赤）
+  // ステータス別クラス（承認=緑／申請中=青／却下=赤）
   const classesForStatus = (status: string | undefined, kind: 'month' | 'block') => {
     const st = status ?? 'pending';
     if (kind === 'month') {
       if (st === 'approved') return 'bg-green-100 text-green-800 hover:bg-green-200';
       if (st === 'rejected') return 'bg-red-100 text-red-800 hover:bg-red-200';
-      return 'bg-gray-100 text-gray-800 hover:bg-gray-200'; // pending
+      return 'bg-blue-100 text-blue-800 hover:bg-blue-200'; // pending
     } else {
       if (st === 'approved') return 'bg-green-500 text-white';
       if (st === 'rejected') return 'bg-red-500 text-white';
-      return 'bg-gray-500 text-white'; // pending
+      return 'bg-blue-500 text-white'; // pending
     }
+  };
+
+  // リサイズハンドルの色（ステータスに応じて変更）
+  const resizeHandleClasses = (status: string | undefined) => {
+    const st = status ?? 'pending';
+    if (st === 'approved') return 'bg-green-600 bg-opacity-40 hover:bg-green-700 hover:bg-opacity-50';
+    if (st === 'rejected') return 'bg-red-600 bg-opacity-40 hover:bg-red-700 hover:bg-opacity-50';
+    return 'bg-blue-600 bg-opacity-40 hover:bg-blue-700 hover:bg-opacity-50'; // pending
   };
 
   // 分を時刻文字列に変換
@@ -866,7 +902,7 @@ export default function ShiftSubmitPage() {
     const hours = getHourLabels();
 
     return (
-      <div className="bg-white rounded-lg shadow overflow-x-auto">
+      <div className="bg-white rounded-lg shadow overflow-x-auto" style={{ WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none' }}>
         <div className="grid grid-cols-8 min-w-max">
           <div className="sticky left-0 bg-gray-50 border-r border-gray-300 border-opacity-50 z-10">
             <div className="h-12 border-b border-gray-300 border-opacity-50"></div>
@@ -886,7 +922,7 @@ export default function ShiftSubmitPage() {
             const holidayName = holiday ? JapaneseHolidays.getHolidaysOf(day.getFullYear(), day.getMonth() + 1, day.getDate())[0]?.name : null;
 
             return (
-              <div key={dayIndex} className="border-r border-gray-300 border-opacity-50 last:border-r-0 min-w-32">
+              <div key={dayIndex} className="border-r border-gray-300 border-opacity-50 last:border-r-0 min-w-32" style={{ WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none' }}>
                 <div className={`h-12 p-2 border-b border-gray-300 border-opacity-50 text-center ${isToday ? 'bg-blue-50 font-bold' : 'bg-gray-50'}`}>
                   <div className={`text-xs ${
                     holiday || dayOfWeek === 0 ? 'text-red-600' : dayOfWeek === 6 ? 'text-blue-600' : 'text-gray-600'
@@ -897,21 +933,20 @@ export default function ShiftSubmitPage() {
                     holiday || dayOfWeek === 0 ? 'text-red-600' : dayOfWeek === 6 ? 'text-blue-600' : ''
                   }`}>{day.getDate()}</div>
                 </div>
-                <div className="relative">
+                <div className="relative" style={{ WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none', touchAction: 'none' }}>
                   {hours.map((hour, hourIndex) => (
                     <div
                       key={hour}
                       className={`h-12 border-b border-gray-300 border-opacity-50 ${isLockedDay ? 'cursor-not-allowed' : 'hover:bg-gray-50 cursor-pointer'}`}
-                      style={{ WebkitTapHighlightColor: 'transparent' }}
+                      style={{ WebkitTapHighlightColor: 'transparent', WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none', touchAction: 'none' }}
                       title={isLockedDay ? 'この日のシフトは締切を過ぎています（前月25日12時）' : ''}
                       onMouseDown={(e) => {
                         if (isLockedDay) return;
                         const rect = e.currentTarget.parentElement!.getBoundingClientRect();
                         const offsetY = e.clientY - rect.top;
                         const minutes = Math.round((offsetY / (48 * 24)) * 24 * 60 / 15) * 15; // 15分単位
-                        setIsDragging(true);
-                        setDragStartInfo({ date: dateStr, startY: e.pageY, startMin: minutes }); // pageYを使用
-                        setTempShift({ date: dateStr, startTime: minToTime(minutes), endTime: minToTime(minutes + 60) });
+                        // 位置情報だけ記録、まだドラッグ開始しない
+                        setDragStartInfo({ date: dateStr, startY: e.pageY, startMin: minutes });
                       }}
                       onTouchStart={(e) => {
                         if (isLockedDay) return;
@@ -951,25 +986,23 @@ export default function ShiftSubmitPage() {
                         }
                         if (isLongPressActive && tempShift) {
                           saveShiftDirect(tempShift);
-                        }
-                        setIsLongPressActive(false);
-                        setIsDragging(false);
-                        setDragStartInfo(null);
-                        setTempShift(null);
-                      }}
-                      onClick={() => {
-                        if (!isDragging) {
+                        } else if (!isLongPressActive && !isDragging && dragStartInfo) {
+                          // タップのみの場合はダイアログを開く
                           setSelectedDate(dateStr);
                           setNewShift({
                             date: dateStr,
-                            startTime: hour,
-                            endTime: `${(hourIndex + 1).toString().padStart(2, '0')}:00`,
+                            startTime: minToTime(dragStartInfo.startMin),
+                            endTime: minToTime(Math.min(dragStartInfo.startMin + 60, 24 * 60)),
                             note: '',
                           });
                           if (!isLockedDay) {
                             setIsAddingShift(true);
                           }
                         }
+                        setIsLongPressActive(false);
+                        setIsDragging(false);
+                        setDragStartInfo(null);
+                        setTempShift(null);
                       }}
                     ></div>
                   ))}
@@ -986,6 +1019,10 @@ export default function ShiftSubmitPage() {
                                 key={shift.id}
                                 className={`absolute left-1 right-1 ${classesForStatus(shift.status, 'block')} text-xs p-1 rounded-md overflow-visible ${!canSubmitForDate(new Date(shift.date)) ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'} group`}
                                 style={{ top: `${top}px`, height: `${height}px` }}
+                                onMouseDown={(e) => {
+                                  // シフトバーをクリックしたときは親のドラッグ開始を防ぐ
+                                  e.stopPropagation();
+                                }}
                                 onClick={(e) => {
                                   const target = e.target as HTMLElement;
                                   if (target.classList.contains('resize-handle')) return;
@@ -1004,7 +1041,7 @@ export default function ShiftSubmitPage() {
                                 {canSubmitForDate(new Date(shift.date)) && (
                                   <>
                                     <div
-                                      className="resize-handle absolute top-0 left-0 right-0 h-3 cursor-ns-resize hover:bg-black hover:bg-opacity-30 transition-opacity bg-gray-400 bg-opacity-30"
+                                      className={`resize-handle absolute top-0 left-0 right-0 h-3 cursor-ns-resize transition-opacity ${resizeHandleClasses(shift.status)}`}
                                       style={{ WebkitTapHighlightColor: 'transparent' }}
                                       onMouseDown={(e) => {
                                         e.stopPropagation();
@@ -1017,7 +1054,7 @@ export default function ShiftSubmitPage() {
                                       }}
                                     />
                                     <div
-                                      className="resize-handle absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize hover:bg-black hover:bg-opacity-30 transition-opacity bg-gray-400 bg-opacity-30"
+                                      className={`resize-handle absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize transition-opacity ${resizeHandleClasses(shift.status)}`}
                                       style={{ WebkitTapHighlightColor: 'transparent' }}
                                       onMouseDown={(e) => {
                                         e.stopPropagation();
@@ -1031,7 +1068,7 @@ export default function ShiftSubmitPage() {
                                     />
                                   </>
                                 )}
-                                <div className="font-semibold pointer-events-none py-1">{shift.startTime}-{shift.endTime}</div>
+                                <div className="font-semibold pointer-events-none pt-3 pb-1">{shift.startTime}-{shift.endTime}</div>
                                 {shift.note && <div className="truncate pointer-events-none">{shift.note}</div>}
                               </div>
                             );
@@ -1068,7 +1105,7 @@ export default function ShiftSubmitPage() {
     const isLockedDay = !canSubmitForDate(currentDate);
 
     return (
-      <div className="bg-white rounded-lg shadow overflow-x-auto">
+      <div className="bg-white rounded-lg shadow overflow-x-auto" style={{ WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none' }}>
         <div className="grid grid-cols-2 min-w-max">
           <div className="sticky left-0 bg-gray-50 border-r border-gray-300 border-opacity-50">
             <div className="h-12 border-b border-gray-300 border-opacity-50 p-2 text-center font-semibold">
@@ -1087,21 +1124,20 @@ export default function ShiftSubmitPage() {
               {currentDate.getMonth() + 1}月{currentDate.getDate()}日
               (<span className={holiday || dayOfWeek === 0 ? 'text-red-600' : dayOfWeek === 6 ? 'text-blue-600' : ''}>{['日', '月', '火', '水', '木', '金', '土'][dayOfWeek]}</span>)
             </div>
-            <div>
+            <div style={{ WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none', touchAction: 'none' }}>
               {hours.map((hour, hourIndex) => (
                 <div
                   key={hour}
                   className={`h-16 border-b border-gray-300 border-opacity-50 ${isLockedDay ? 'cursor-not-allowed' : 'hover:bg-gray-50 cursor-pointer'}`}
-                  style={{ WebkitTapHighlightColor: 'transparent' }}
+                  style={{ WebkitTapHighlightColor: 'transparent', WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none', touchAction: 'none' }}
                   title={isLockedDay ? 'この日のシフトは締切を過ぎています（前月25日12時）' : ''}
                   onMouseDown={(e) => {
                     if (isLockedDay) return;
                     const rect = e.currentTarget.parentElement!.getBoundingClientRect();
                     const offsetY = e.clientY - rect.top; // ヘッダー分は含まない（parentElement!はdivコンテナ）
                     const minutes = Math.round((offsetY / 64) * 60 / 15) * 15; // 64px = 1時間、15分単位
-                    setIsDragging(true);
-                    setDragStartInfo({ date: dateStr, startY: e.pageY, startMin: minutes }); // pageYを使用
-                    setTempShift({ date: dateStr, startTime: minToTime(minutes), endTime: minToTime(minutes + 60) });
+                    // 位置情報だけ記録、まだドラッグ開始しない
+                    setDragStartInfo({ date: dateStr, startY: e.pageY, startMin: minutes });
                   }}
                   onTouchStart={(e) => {
                     if (isLockedDay) return;
@@ -1141,25 +1177,23 @@ export default function ShiftSubmitPage() {
                     }
                     if (isLongPressActive && tempShift) {
                       saveShiftDirect(tempShift);
-                    }
-                    setIsLongPressActive(false);
-                    setIsDragging(false);
-                    setDragStartInfo(null);
-                    setTempShift(null);
-                  }}
-                  onClick={() => {
-                    if (!isDragging) {
+                    } else if (!isLongPressActive && !isDragging && dragStartInfo) {
+                      // タップのみの場合はダイアログを開く
                       setSelectedDate(dateStr);
                       setNewShift({
                         date: dateStr,
-                        startTime: hour,
-                        endTime: `${(hourIndex + 1).toString().padStart(2, '0')}:00`,
+                        startTime: minToTime(dragStartInfo.startMin),
+                        endTime: minToTime(Math.min(dragStartInfo.startMin + 60, 24 * 60)),
                         note: '',
                       });
                       if (!isLockedDay) {
                         setIsAddingShift(true);
                       }
                     }
+                    setIsLongPressActive(false);
+                    setIsDragging(false);
+                    setDragStartInfo(null);
+                    setTempShift(null);
                   }}
                 ></div>
               ))}
@@ -1177,6 +1211,10 @@ export default function ShiftSubmitPage() {
                     className={`absolute left-2 right-2 ${classesForStatus(shift.status, 'block')} p-2 rounded overflow-visible ${!canSubmitForDate(new Date(shift.date)) ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'} group`}
                     title={!canSubmitForDate(new Date(shift.date)) ? 'このシフトは締切後のため編集できません' : ''}
                     style={{ top: `${top + 48}px`, height: `${height}px` }}
+                    onMouseDown={(e) => {
+                      // シフトバーをクリックしたときは親のドラッグ開始を防ぐ
+                      e.stopPropagation();
+                    }}
                     onClick={(e) => {
                       const target = e.target as HTMLElement;
                       if (target.classList.contains('resize-handle')) return;
@@ -1195,7 +1233,7 @@ export default function ShiftSubmitPage() {
                     {canSubmitForDate(new Date(shift.date)) && (
                       <>
                         <div
-                          className="resize-handle absolute top-0 left-0 right-0 h-4 cursor-ns-resize hover:bg-black hover:bg-opacity-30 transition-opacity bg-gray-400 bg-opacity-30"
+                          className={`resize-handle absolute top-0 left-0 right-0 h-4 cursor-ns-resize transition-opacity ${resizeHandleClasses(shift.status)}`}
                           style={{ WebkitTapHighlightColor: 'transparent' }}
                           onMouseDown={(e) => {
                             e.stopPropagation();
@@ -1208,7 +1246,7 @@ export default function ShiftSubmitPage() {
                           }}
                         />
                         <div
-                          className="resize-handle absolute bottom-0 left-0 right-0 h-4 cursor-ns-resize hover:bg-black hover:bg-opacity-30 transition-opacity bg-gray-400 bg-opacity-30"
+                          className={`resize-handle absolute bottom-0 left-0 right-0 h-4 cursor-ns-resize transition-opacity ${resizeHandleClasses(shift.status)}`}
                           style={{ WebkitTapHighlightColor: 'transparent' }}
                           onMouseDown={(e) => {
                             e.stopPropagation();
