@@ -64,6 +64,8 @@ export default function AdminShiftListPage() {
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [editingLabelName, setEditingLabelName] = useState('');
   const [editingLabelColor, setEditingLabelColor] = useState('#8b5cf6');
+  const [showBulkApprovalConfirm, setShowBulkApprovalConfirm] = useState(false);
+  const [bulkApproving, setBulkApproving] = useState(false);
   
   const availableColors = [
     { name: '紫', value: '#8b5cf6' },
@@ -549,6 +551,46 @@ export default function AdminShiftListPage() {
     }
   };
 
+  const bulkApproveDay = async () => {
+    if (!userProfile?.uid || !selectedDay) return;
+    setBulkApproving(true);
+    try {
+      const approverRef = doc(db, 'users', userProfile.uid);
+      const now = Timestamp.now();
+      
+      // その日の未承認シフト（pending, rejected）を全て承認
+      const shiftsToApprove = dayShifts.filter(s => s.status !== 'approved');
+      
+      for (const shift of shiftsToApprove) {
+        await updateDoc(doc(db, 'shifts', shift.id), {
+          status: 'approved',
+          approvedBy: approverRef,
+          approvedAt: now,
+          rejectReason: null,
+        } as any);
+      }
+      
+      // ローカルステートを更新
+      setShifts(prev => prev.map(s => {
+        const shouldApprove = shiftsToApprove.find(sa => sa.id === s.id);
+        if (shouldApprove) {
+          return { ...s, status: 'approved', approvedByName: userProfile.displayName || '', approvedAt: new Date(), rejectReason: null };
+        }
+        return s;
+      }));
+      
+      // dayShiftsも更新
+      await fetchDayShifts(selectedDay);
+      
+      setShowBulkApprovalConfirm(false);
+    } catch (e) {
+      alert('一括承認に失敗しました');
+      console.error(e);
+    } finally {
+      setBulkApproving(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 py-6">
@@ -563,81 +605,11 @@ export default function AdminShiftListPage() {
             <div className="font-semibold">{selectedMonth.getFullYear()}年 {selectedMonth.getMonth() + 1}月</div>
             <button onClick={nextMonth} className="px-2 py-1 border rounded">→</button>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setViewMode('table')} className={`px-3 py-1 rounded ${viewMode === 'table' ? 'bg-blue-500 text-white' : 'bg-gray-100 hover:bg-gray-200'}`}>表</button>
-            <button onClick={() => setViewMode('month')} className={`px-3 py-1 rounded ${viewMode === 'month' ? 'bg-blue-500 text-white' : 'bg-gray-100 hover:bg-gray-200'}`}>月</button>
-          </div>
-          {viewMode === 'table' && (
-            <div className="ml-auto flex items-center gap-2">
-              <label className="text-sm text-gray-600">ユーザー</label>
-              <select value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)} className="px-2 py-1 border rounded">
-                <option value="all">すべて</option>
-                {usersWithShifts.map(u => (
-                  <option value={u.id} key={u.id}>{u.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-          
         </div>
 
-        {viewMode === 'table' && (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="text-center p-2 border-b">日付</th>
-                <th className="text-center p-2 border-b">ユーザー</th>
-                <th className="text-center p-2 border-b">時間帯</th>
-                <th className="text-center p-2 border-b">備考</th>
-                <th className="text-center p-2 border-b">ステータス</th>
-                <th className="text-center p-2 border-b">承認者/日時</th>
-                <th className="text-center p-2 border-b">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td className="p-4 text-center" colSpan={7}>読み込み中...</td></tr>
-              ) : filtered.length === 0 ? (
-                <tr><td className="p-4 text-center" colSpan={7}>該当データがありません</td></tr>
-              ) : (
-                filtered.map(row => (
-                  <tr key={row.id} className="hover:bg-gray-50">
-                    <td className="p-2 border-b text-center">{fmt(row.date)}</td>
-                    <td className="p-2 border-b text-center">
-                      <div className="inline-flex items-center gap-2">
-                        <img src={avatarUrl(row.avatarSeed || row.userName || row.userId, row.avatarBgColor)} alt={row.userName} className="w-6 h-6 rounded-full ring-1 ring-gray-200" />
-                        <span>{row.userName}</span>
-                      </div>
-                    </td>
-                    <td className="p-2 border-b text-center">{row.startTime} - {row.endTime}</td>
-                    <td className="p-2 border-b text-center">{row.note}</td>
-                    <td className="p-2 border-b text-center">
-                      {row.status === 'approved' && <span className="inline-block px-2 py-0.5 rounded bg-green-100 text-green-700">承認</span>}
-                      {row.status === 'pending' && <span className="inline-block px-2 py-0.5 rounded bg-gray-100 text-gray-700">申請中</span>}
-                      {row.status === 'rejected' && <span className="inline-block px-2 py-0.5 rounded bg-red-100 text-red-700">却下</span>}
-                    </td>
-                    <td className="p-2 border-b text-center text-xs text-gray-600">
-                      {row.approvedByName ? `${row.approvedByName} / ${row.approvedAt ? fmtDateTime(row.approvedAt) : ''}` : '-'}
-                    </td>
-                    <td className="p-2 border-b text-center">
-                      <div className="flex gap-2 justify-center">
-                        <button disabled={row.status === 'approved'} onClick={() => approve(row.id)} className={`px-2 py-1 rounded border ${row.status === 'approved' ? 'opacity-40 cursor-not-allowed' : 'hover:bg-green-50 border-green-600 text-green-700'}`}>承認</button>
-                        <button onClick={() => reject(row.id)} className="px-2 py-1 rounded border hover:bg-red-50 border-red-600 text-red-700">却下</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-        )}
-
-        {viewMode === 'month' && (
-          <div className="bg-white rounded-lg shadow p-4">
-            {/* 月カレンダー（週表示：日〜土） */}
-            <div className="mb-4">
+        <div className="bg-white rounded-lg shadow p-4">
+          {/* 月カレンダー（週表示：日〜土） */}
+          <div className="mb-4">
               <div className="grid grid-cols-7 border-b border-gray-300 border-opacity-50">
                 {['日','月','火','水','木','金','土'].map((w, i) => (
                   <div key={w} className={`p-3 text-center font-semibold border-r border-gray-300 border-opacity-50 last:border-r-0 ${i===0?'text-red-600':i===6?'text-blue-600':''}`}>{w}</div>
@@ -661,19 +633,49 @@ export default function AdminShiftListPage() {
                     const holiday = JapaneseHolidays.isHoliday(d);
                     const dateColor = holiday || dow === 0 ? 'text-red-600' : dow === 6 ? 'text-blue-600' : inMonth ? 'text-gray-900' : 'text-gray-300';
                     const isSelected = selectedDay && selectedDay.getFullYear() === d.getFullYear() && selectedDay.getMonth() === d.getMonth() && selectedDay.getDate() === d.getDate();
+                    
+                    // その日のシフトを取得
+                    const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                    const dayShiftsForCell = filtered.filter(s => {
+                      const shiftKey = `${s.date.getFullYear()}-${String(s.date.getMonth() + 1).padStart(2, '0')}-${String(s.date.getDate()).padStart(2, '0')}`;
+                      return shiftKey === dayKey;
+                    });
+                    
+                    // ユーザーIDでグループ化（同じ人が複数シフトでも1つのアイコン）
+                    const uniqueUsers = Array.from(new Map(dayShiftsForCell.map(s => [s.userId, s])).values());
+                    const maxDisplay = 6; // 表示する最大アイコン数
+                    const displayUsers = uniqueUsers.slice(0, maxDisplay);
+                    const remaining = Math.max(0, uniqueUsers.length - maxDisplay);
+                    
                     return (
                       <button key={d.toISOString()} onClick={() => { setSelectedDay(d); fetchDayShifts(d); }} className={`relative min-h-24 p-2 border-r border-b border-gray-300 border-opacity-50 last:border-r-0 transition-colors ${!inMonth?'bg-gray-50':''} ${isSelected ? 'bg-blue-50 border-blue-200' : 'bg-white hover:bg-gray-100'}`}>
                         <div className={`absolute top-1 left-1 text-sm ${!inMonth ? 'text-gray-400' : dateColor} ${isSelected ? 'font-bold' : ''}`}>{d.getDate()}</div>
-                        <div className="text-[11px] text-gray-400" style={{ visibility: 'hidden' }}>{inMonth ? '' : ''}</div>
+                        {dayShiftsForCell.length > 0 && (
+                          <div className="mt-5 flex flex-wrap gap-1 items-center justify-center">
+                            {displayUsers.map((s, idx) => (
+                              <img
+                                key={idx}
+                                src={`https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(s.avatarSeed || s.userName || s.userId)}${s.avatarBgColor ? `&backgroundColor=${encodeURIComponent(s.avatarBgColor)}` : '&backgroundType=gradientLinear'}&radius=50`}
+                                alt={s.userName}
+                                className="w-6 h-6 rounded-full"
+                                title={s.userName}
+                              />
+                            ))}
+                            {remaining > 0 && (
+                              <div className="text-xs text-gray-600 font-medium">+{remaining}人</div>
+                            )}
+                          </div>
+                        )}
                       </button>
                     );
                   });
                 })()}
               </div>
             </div>
+        </div>
 
-            {/* 選択日があれば時間軸表示（全ユーザー）- モーダル表示 */}
-            {selectedDay && (
+        {/* 選択日があれば時間軸表示（全ユーザー）- モーダル表示 */}
+        {selectedDay && (
               <div className="fixed inset-0 bg-black/50 z-40 flex items-start justify-center pt-8 p-4" onClick={() => { setSelectedDay(null); setDayShifts([]); setEditedShifts(new Map()); }}>
                 <div className="bg-white rounded-lg shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
                   <div className="px-6 py-4 border-b flex items-center justify-between bg-gray-50">
@@ -686,6 +688,14 @@ export default function AdminShiftListPage() {
                           className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm font-semibold"
                         >
                           {saving ? '保存中...' : `変更を保存 (${editedShifts.size})`}
+                        </button>
+                      )}
+                      {dayShifts.filter(s => s.status !== 'approved').length > 0 && (
+                        <button
+                          onClick={() => setShowBulkApprovalConfirm(true)}
+                          className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-semibold"
+                        >
+                          一括確定
                         </button>
                       )}
                       <button 
@@ -761,9 +771,11 @@ export default function AdminShiftListPage() {
                           if (usersToShow.length === 0) return <div className="text-sm text-gray-500">この日に提出されたシフトはありません</div>;
                           return usersToShow.map(user => {
                             const shiftsForUser = dayShifts.filter(s => s.userId === user.id);
+                            // ユーザーの備考をまとめる（重複を排除）
+                            const userNotes = Array.from(new Set(shiftsForUser.map(s => s.note).filter(n => n && n.trim() !== ''))).join(' / ');
                           return (
-                            <div key={user.id} className="flex items-start">
-                              <div className="w-40 pr-2">
+                            <div key={user.id} className="flex items-start gap-3">
+                              <div className="w-40 pr-2 flex-shrink-0">
                                 <div className="flex items-center gap-2">
                                   <img src={avatarUrl(user.seed || user.name || user.id, user.bgColor)} alt={user.name} className="w-8 h-8 rounded-full ring-1 ring-gray-200" />
                                   <div className="text-sm">{user.name}</div>
@@ -877,7 +889,8 @@ export default function AdminShiftListPage() {
                                       
                                       const getShiftColor = () => {
                                         if (s.status === 'rejected') return '#dc2626'; // 却下は赤
-                                        if (s.status === 'approved' && s.labelId) {
+                                        // ラベルが設定されている場合は、ステータスに関わらずラベルの色を使用
+                                        if (s.labelId) {
                                           const label = shiftLabels.find(l => l.id === s.labelId);
                                           if (label) return label.color;
                                         }
@@ -915,6 +928,17 @@ export default function AdminShiftListPage() {
                                     })}
                                 </div>
                               </div>
+                              <div className="w-48 flex-shrink-0">
+                                {userNotes ? (
+                                  <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded border border-gray-200 h-12 overflow-y-auto">
+                                    {userNotes}
+                                  </div>
+                                ) : (
+                                  <div className="text-xs text-gray-400 bg-gray-50 p-2 rounded border border-gray-200 h-12 flex items-center justify-center">
+                                    備考なし
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           );
                           });
@@ -927,14 +951,40 @@ export default function AdminShiftListPage() {
                 </div>
               </div>
             )}
+
+        {/* 一括承認確認モーダル */}
+        {showBulkApprovalConfirm && (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setShowBulkApprovalConfirm(false)}>
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-lg font-semibold mb-4">一括承認の確認</h3>
+              <p className="text-gray-700 mb-6">
+                この日の全員のシフトを承認します。<br />
+                よろしいですか？
+              </p>
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setShowBulkApprovalConfirm(false)}
+                  disabled={bulkApproving}
+                  className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50"
+                >
+                  いいえ
+                </button>
+                <button
+                  onClick={bulkApproveDay}
+                  disabled={bulkApproving}
+                  className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 font-semibold"
+                >
+                  {bulkApproving ? '承認中...' : 'はい'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
-      </div>
 
       {/* シフト編集・承認モーダル */}
       {editingShiftId && editingShift && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => { setEditingShiftId(null); setEditingShift(null); setTempLabelId(undefined); }}>
-          <div className="bg-white rounded-lg p-6 w-[480px]" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-lg p-6 w-[900px] max-w-[95vw]" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex items-start justify-between">
               <div className="flex-1">
                 <h3 className="text-lg font-semibold">シフト操作</h3>
@@ -980,43 +1030,47 @@ export default function AdminShiftListPage() {
               </div>
             </div>
 
-            <div className="space-y-4 mb-6">
-              {editingShift.status === 'approved' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">ラベル（色分け）</label>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => {
-                          setTempLabelId(null);
-                        }}
-                        className={`px-3 py-1.5 rounded border text-sm font-medium ${
-                          (tempLabelId === undefined ? !editingShift.labelId : tempLabelId === null) ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                        }`}
-                      >
-                        なし
-                      </button>
-                      {shiftLabels.map(label => (
-                        <button
-                          key={label.id}
-                          onClick={() => {
-                            setTempLabelId(label.id);
-                          }}
-                          className={`px-3 py-1.5 rounded border text-sm font-medium transition-all hover:brightness-90 ${
-                            (tempLabelId === undefined ? editingShift.labelId === label.id : tempLabelId === label.id) ? 'text-white border-transparent' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                          }`}
-                          style={(tempLabelId === undefined ? editingShift.labelId === label.id : tempLabelId === label.id) ? { backgroundColor: label.color } : {}}
-                        >
-                          {label.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
+            {/* 左右分割レイアウト */}
+            <div className="grid grid-cols-2 gap-4">
+              {/* 左側: 役職変更セクション */}
+              <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                <h4 className="text-sm font-semibold text-gray-800 mb-3">🏷️ 役職変更</h4>
+                <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">ラベル（色分け）</label>
+                  <div className="flex flex-wrap gap-2">
                     <button
-                      onClick={async () => {
-                        if (tempLabelId !== undefined) {
+                      onClick={() => {
+                        setTempLabelId(null);
+                      }}
+                      className={`px-3 py-1.5 rounded border text-sm font-medium ${
+                        (tempLabelId === undefined ? !editingShift.labelId : tempLabelId === null) ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      なし
+                    </button>
+                    {shiftLabels.map(label => (
+                      <button
+                            key={label.id}
+                            onClick={() => {
+                              setTempLabelId(label.id);
+                            }}
+                            className={`px-3 py-1.5 rounded border text-sm font-medium transition-all hover:brightness-90 ${
+                              (tempLabelId === undefined ? editingShift.labelId === label.id : tempLabelId === label.id) ? 'text-white border-transparent' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                            }`}
+                            style={(tempLabelId === undefined ? editingShift.labelId === label.id : tempLabelId === label.id) ? { backgroundColor: label.color } : {}}
+                          >
+                            {label.name}
+                          </button>
+                        ))}
+                  </div>
+                </div>
+
+                <div>
+                  <button
+                    onClick={async () => {
+                      if (tempLabelId !== undefined) {
+                        try {
                           const editedTime = editedShifts.get(editingShiftId);
                           const updateData: any = { labelId: tempLabelId };
                           
@@ -1031,24 +1085,48 @@ export default function AdminShiftListPage() {
                           setEditedShifts(newMap);
                           
                           await updateDoc(doc(db, 'shifts', editingShiftId), updateData);
+                          
+                          // shiftsステートを更新
+                          setShifts(prev => prev.map(s => {
+                            if (s.id === editingShiftId) {
+                              return { 
+                                ...s, 
+                                labelId: tempLabelId,
+                                ...(editedTime ? { startTime: editedTime.startTime, endTime: editedTime.endTime } : {})
+                              };
+                            }
+                            return s;
+                          }));
+                          
                           await fetchDayShifts(selectedDay!);
                           setEditingShiftId(null);
                           setEditingShift(null);
                           setTempLabelId(undefined);
+                          setSplitMode(false);
+                        } catch (e) {
+                          console.error('Label update failed', e);
+                          alert('役職の設定に失敗しました');
                         }
-                      }}
-                      disabled={tempLabelId === undefined}
-                      className={`w-full py-2.5 rounded-md font-semibold ${
-                        tempLabelId === undefined
-                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                          : 'bg-blue-600 text-white hover:bg-blue-700'
-                      }`}
-                    >
-                      役職確定
-                    </button>
-                  </div>
+                      }
+                    }}
+                    disabled={tempLabelId === undefined}
+                    className={`w-full py-2.5 rounded-md font-semibold ${
+                      tempLabelId === undefined
+                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        : 'bg-gray-900 text-white hover:bg-black'
+                    }`}
+                  >
+                    役職確定
+                  </button>
+                </div>
+                </div>
+              </div>
 
-                  <div className="border-t pt-4">
+              {/* 右側: 時間変更・分割セクション */}
+              <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <h4 className="text-sm font-semibold text-gray-800 mb-3">🕐 時間変更・分割</h4>
+                <div className="space-y-4">
+                <div>
                     <button
                       onClick={() => {
                         setSplitMode(!splitMode);
@@ -1156,52 +1234,55 @@ export default function AdminShiftListPage() {
                         </div>
                       </div>
                     )}
-                  </div>
-                </>
-              )}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">開始時刻</label>
-                <input
-                  type="time"
-                  value={editModalTime.startTime}
-                  onChange={(e) => setEditModalTime(prev => ({ ...prev, startTime: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">終了時刻</label>
-                <input
-                  type="time"
-                  value={editModalTime.endTime}
-                  onChange={(e) => setEditModalTime(prev => ({ ...prev, endTime: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">開始時刻</label>
+                  <input
+                    type="time"
+                    value={editModalTime.startTime}
+                    onChange={(e) => setEditModalTime(prev => ({ ...prev, startTime: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">終了時刻</label>
+                  <input
+                    type="time"
+                    value={editModalTime.endTime}
+                    onChange={(e) => setEditModalTime(prev => ({ ...prev, endTime: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    onClick={() => {
+                      if (editModalTime.startTime && editModalTime.endTime) {
+                        setEditedShifts(prev => new Map(prev).set(editingShiftId, editModalTime));
+                        setEditingShiftId(null);
+                        setEditingShift(null);
+                      } else {
+                        alert('開始時刻と終了時刻を入力してください');
+                      }
+                    }}
+                    className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold"
+                  >
+                    時間を変更
+                  </button>
+                </div>
+                </div>
               </div>
             </div>
 
-            <div className="border-t pt-4">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => { setEditingShiftId(null); setEditingShift(null); }}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
-                >
-                  キャンセル
-                </button>
-                <button
-                  onClick={() => {
-                    if (editModalTime.startTime && editModalTime.endTime) {
-                      setEditedShifts(prev => new Map(prev).set(editingShiftId, editModalTime));
-                      setEditingShiftId(null);
-                      setEditingShift(null);
-                    } else {
-                      alert('開始時刻と終了時刻を入力してください');
-                    }
-                  }}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                >
-                  時間を変更
-                </button>
-              </div>
+            {/* キャンセルボタン（モーダル下部中央） */}
+            <div className="mt-4 flex justify-center">
+              <button
+                onClick={() => { setEditingShiftId(null); setEditingShift(null); setSplitMode(false); setTempLabelId(undefined); }}
+                className="px-6 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+              >
+                キャンセル
+              </button>
             </div>
           </div>
         </div>
@@ -1362,6 +1443,7 @@ export default function AdminShiftListPage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
