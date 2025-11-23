@@ -32,7 +32,7 @@ export default function PartTimePayrollPage() {
   const [error, setError] = useState<string | null>(null);
   
   // モーダル管理
-  const [submitModal, setSubmitModal] = useState<{ isOpen: boolean; count: number; incompleteList?: string[] }>({ isOpen: false, count: 0 });
+  const [submitModal, setSubmitModal] = useState<{ isOpen: boolean; count: number; incompleteCards?: string[] }>({ isOpen: false, count: 0 });
   const [timecards, setTimecards] = useState<TimecardRow[]>([]);
   const [orgSettings, setOrgSettings] = useState<{
     defaultHourlyWage: number;
