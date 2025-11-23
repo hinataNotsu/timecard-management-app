@@ -287,7 +287,7 @@ export default function PartTimePayrollPage() {
       });
       
       // モーダルで確認するため、ここではreturnしない
-      setSubmitModal({ isOpen: true, count: completedDraftCards.length, incompleteList });
+      setSubmitModal({ isOpen: true, count: completedDraftCards.length, incompleteCards: incompleteList });
       return;
     } else {
       setSubmitModal({ isOpen: true, count: completedDraftCards.length });
