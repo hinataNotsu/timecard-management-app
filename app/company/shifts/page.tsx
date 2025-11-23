@@ -68,7 +68,7 @@ export default function AdminShiftListPage() {
   const [editingLabelColor, setEditingLabelColor] = useState('#8b5cf6');
   
   // モーダル管理
-  const [approveShiftModalData, setApproveShiftModalData] = useState<{ isOpen: boolean; message?: string; outOfRangeShifts?: any[] }>({ isOpen: false });
+  const [approveShiftModalData, setApproveShiftModalData] = useState<{ isOpen: boolean; message?: string; outOfRangeShifts?: any[]; shiftsCount?: number }>({ isOpen: false });
   const [deleteLabelModalData, setDeleteLabelModalData] = useState<{ isOpen: boolean; labelId: string; labelName: string }>({ isOpen: false, labelId: '', labelName: '' });
   
   const availableColors = [
