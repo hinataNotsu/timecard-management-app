@@ -1379,7 +1379,7 @@ export default function AdminShiftListPage() {
       <DeleteLabelModal 
         isOpen={deleteLabelModalData.isOpen}
         onClose={() => setDeleteLabelModalData({ isOpen: false, labelId: '', labelName: '' })}
-        onConfirm={executeDeleteLabel}
+        onConfirm={() => executeDeleteLabel(deleteLabelModalData.labelId)}
         labelName={deleteLabelModalData.labelName}
       />
     </div>
