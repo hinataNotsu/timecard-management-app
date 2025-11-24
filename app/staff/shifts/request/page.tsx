@@ -290,6 +290,16 @@ export default function ShiftSubmitPage() {
         startTime: minToTime(dragStartInfo.startMin),
         endTime: minToTime(Math.min(endMin, 24 * 60))
       });
+
+      // 画面端での自動スクロール
+      const scrollThreshold = 50; // 端から50pxの範囲でスクロール
+      const scrollSpeed = 10;
+      
+      if (e.clientY < scrollThreshold) {
+        window.scrollBy(0, -scrollSpeed);
+      } else if (e.clientY > window.innerHeight - scrollThreshold) {
+        window.scrollBy(0, scrollSpeed);
+      }
     };
     
     const handleMouseUp = async () => {
@@ -492,6 +502,25 @@ export default function ShiftSubmitPage() {
   useEffect(() => {
     loadMonthShifts(currentDate);
   }, [userProfile?.uid, userProfile?.currentOrganizationId, currentDate.getFullYear(), currentDate.getMonth()]);
+
+  // ドラッグ中は画面スクロールを無効化
+  useEffect(() => {
+    if (isDragging || isLongPressActive) {
+      const scrollY = window.scrollY;
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.width = '100%';
+      
+      return () => {
+        document.body.style.overflow = '';
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.width = '';
+        window.scrollTo(0, scrollY);
+      };
+    }
+  }, [isDragging, isLongPressActive]);
 
   // カレンダー表示用の日付配列を生成
   const getCalendarDays = (date: Date): Date[] => {
@@ -991,6 +1020,16 @@ export default function ShiftSubmitPage() {
                           startTime: minToTime(dragStartInfo.startMin),
                           endTime: minToTime(Math.min(endMin, 24 * 60 - 15)),
                         });
+
+                        // 画面端での自動スクロール
+                        const scrollThreshold = 50;
+                        const scrollSpeed = 10;
+                        
+                        if (touch.clientY < scrollThreshold) {
+                          window.scrollBy(0, -scrollSpeed);
+                        } else if (touch.clientY > window.innerHeight - scrollThreshold) {
+                          window.scrollBy(0, scrollSpeed);
+                        }
                       }}
                       onTouchEnd={() => {
                         if (longPressTimer) {
@@ -1182,6 +1221,16 @@ export default function ShiftSubmitPage() {
                       startTime: minToTime(dragStartInfo.startMin),
                       endTime: minToTime(Math.min(endMin, 24 * 60 - 15)),
                     });
+
+                    // 画面端での自動スクロール
+                    const scrollThreshold = 50;
+                    const scrollSpeed = 10;
+                    
+                    if (touch.clientY < scrollThreshold) {
+                      window.scrollBy(0, -scrollSpeed);
+                    } else if (touch.clientY > window.innerHeight - scrollThreshold) {
+                      window.scrollBy(0, scrollSpeed);
+                    }
                   }}
                   onTouchEnd={() => {
                     if (longPressTimer) {
