@@ -37,7 +37,6 @@ export default function OrganizationMembersPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<MemberRow[]>([]);
-  const [saving, setSaving] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   
   // 申請一覧用のstate
@@ -46,6 +45,9 @@ export default function OrganizationMembersPage() {
   
   // モーダル状態管理
   const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; uid: string; displayName: string }>({ isOpen: false, uid: '', displayName: '' });
+  
+  // ドロップダウンメニュー状態
+  const [openMenuUid, setOpenMenuUid] = useState<string | null>(null);
   
   // ...existing code...
 
@@ -153,27 +155,6 @@ export default function OrganizationMembersPage() {
     };
     fetchRequests();
   }, [orgId]);
-
-  const saveRow = async (uid: string, transport: number | undefined, wage: number | undefined) => {
-    if (!orgId) return;
-    setSaving(uid);
-    try {
-      await setDoc(
-        doc(db, 'organizations', orgId, 'members', uid),
-        {
-          transportAllowancePerShift: typeof transport === 'number' ? transport : null,
-          hourlyWage: typeof wage === 'number' ? wage : null,
-          updatedAt: Timestamp.now(),
-        },
-        { merge: true }
-      );
-    } catch (e) {
-      console.error('[Members] save error', e);
-      alert('保存に失敗しました');
-    } finally {
-      setSaving(null);
-    }
-  };
 
   const markAsRetired = (uid: string, displayName: string) => {
     if (!orgId) return;
@@ -367,15 +348,14 @@ export default function OrganizationMembersPage() {
                       <th className="p-2 border-b text-left">メール</th>
                       <th className="p-2 border-b text-center">時給（円/h）</th>
                       <th className="p-2 border-b text-center">交通費（円/シフト）</th>
-                      <th className="p-2 border-b text-center">保存</th>
-                      <th className="p-2 border-b text-center">退職処理</th>
+                      <th className="p-2 border-b text-center">操作</th>
                     </tr>
                   </thead>
                 <tbody>
                     {loading ? (
-                      <tr><td className="p-4 text-center" colSpan={7}>読み込み中...</td></tr>
+                      <tr><td className="p-4 text-center" colSpan={6}>読み込み中...</td></tr>
                     ) : rows.length === 0 ? (
-                      <tr><td className="p-4 text-center" colSpan={7}>在籍メンバーがいません</td></tr>
+                      <tr><td className="p-4 text-center" colSpan={6}>在籍メンバーがいません</td></tr>
                     ) : (
                       rows.map((r) => (
                       <tr key={r.uid} className="hover:bg-gray-50">
@@ -385,46 +365,43 @@ export default function OrganizationMembersPage() {
                         <td className="p-2 border-b">{r.displayName}</td>
                         <td className="p-2 border-b">{r.email}</td>
                         <td className="p-2 border-b text-center">
-                          <input
-                            type="number"
-                            min={0}
-                            value={r.hourlyWage ?? ''}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              const num = v === '' ? undefined : Number(v);
-                              setRows(prev => prev.map((x) => x.uid === r.uid ? { ...x, hourlyWage: num } : x));
-                            }}
-                            className="w-32 px-2 py-1 border rounded text-right"
-                            placeholder="例: 1200"
-                          />
+                          {r.hourlyWage ? `¥${r.hourlyWage.toLocaleString()}` : '-'}
                         </td>
                         <td className="p-2 border-b text-center">
-                          <input
-                            type="number"
-                            min={0}
-                            value={r.transportAllowancePerShift ?? ''}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              const num = v === '' ? undefined : Number(v);
-                              setRows(prev => prev.map((x) => x.uid === r.uid ? { ...x, transportAllowancePerShift: num } : x));
-                            }}
-                            className="w-32 px-2 py-1 border rounded text-right"
-                            placeholder="例: 500"
-                          />
+                          {r.transportAllowancePerShift ? `¥${r.transportAllowancePerShift.toLocaleString()}` : '-'}
                         </td>
-                        <td className="p-2 border-b text-center">
+                        <td className="p-2 border-b text-center relative">
                           <button
-                            onClick={() => saveRow(r.uid, r.transportAllowancePerShift, r.hourlyWage)}
-                            disabled={saving === r.uid}
-                            className={`px-3 py-1 rounded text-sm ${saving === r.uid ? 'bg-gray-300 text-gray-500' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
-                          >{saving === r.uid ? '保存中' : '保存'}</button>
-                        </td>
-                        <td className="p-2 border-b text-center">
-                          <button
-                            onClick={() => markAsRetired(r.uid, r.displayName)}
-                            disabled={removing === r.uid}
-                            className={`px-3 py-1 rounded text-sm ${removing === r.uid ? 'bg-gray-300 text-gray-500' : 'bg-amber-600 text-white hover:bg-amber-700'}`}
-                          >{removing === r.uid ? '処理中' : '退職処理'}</button>
+                            onClick={() => setOpenMenuUid(openMenuUid === r.uid ? null : r.uid)}
+                            className="px-2 py-1 text-gray-600 hover:bg-gray-100 rounded"
+                          >
+                            ⋮
+                          </button>
+                          {openMenuUid === r.uid && (
+                            <>
+                              <div className="fixed inset-0 z-10" onClick={() => setOpenMenuUid(null)} />
+                              <div className="absolute right-0 mt-1 w-32 bg-white border rounded-lg shadow-lg z-20">
+                                <button
+                                  onClick={() => {
+                                    setOpenMenuUid(null);
+                                    router.push(`/company/members/${r.uid}/edit`);
+                                  }}
+                                  className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 rounded-t-lg"
+                                >
+                                  編集
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setOpenMenuUid(null);
+                                    markAsRetired(r.uid, r.displayName);
+                                  }}
+                                  className="w-full px-4 py-2 text-left text-sm text-amber-600 hover:bg-gray-100 rounded-b-lg"
+                                >
+                                  退職処理
+                                </button>
+                              </div>
+                            </>
+                          )}
                         </td>
                       </tr>
                     ))
