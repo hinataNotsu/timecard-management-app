@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { collection, doc, getDoc, getDocs, orderBy, query, where, Timestamp, updateDoc, setDoc } from 'firebase/firestore';
 import JapaneseHolidays from 'japanese-holidays';
 import { db } from '@/lib/firebase';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 
 interface TimecardRow {
   id: string;
@@ -51,6 +52,7 @@ export default function PayrollPage() {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
+  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; userId: string }>({ isOpen: false, userId: '' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [timecards, setTimecards] = useState<TimecardRow[]>([]);
@@ -356,8 +358,12 @@ export default function PayrollPage() {
 
   // 承認処理
   // 承認処理
-  const handleApprove = async (userId: string) => {
-    if (!confirm('この申請を承認しますか？')) return;
+  const handleApprove = (userId: string) => {
+    setConfirmModal({ isOpen: true, userId });
+  };
+
+  const executeApprove = async () => {
+    const userId = confirmModal.userId;
     try {
       const userTimecards = timecards.filter(tc => tc.userId === userId && tc.status === 'pending');
       const now = Timestamp.now();
@@ -816,6 +822,17 @@ export default function PayrollPage() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal({ isOpen: false, userId: '' })}
+        onConfirm={executeApprove}
+        title="申請承認"
+        message="この申請を承認しますか？"
+        confirmText="承認"
+        cancelText="キャンセル"
+        variant="success"
+      />
     </div>
   );
 }

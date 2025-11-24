@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { collection, doc, getDoc, getDocs, query, updateDoc, where, setDoc, deleteDoc, Timestamp, arrayRemove, arrayUnion } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 
 interface MemberRow {
   uid: string;
@@ -44,6 +45,9 @@ export default function OrganizationMembersPage() {
   // 申請一覧用のstate
   const [requests, setRequests] = useState<Request[]>([]);
   const [requestsLoading, setRequestsLoading] = useState(true);
+  
+  // モーダル状態管理
+  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; type: 'retire' | 'remove'; uid: string; displayName: string }>({ isOpen: false, type: 'retire', uid: '', displayName: '' });
   
   // ...existing code...
 
@@ -176,9 +180,14 @@ export default function OrganizationMembersPage() {
     }
   };
 
-  const markAsRetired = async (uid: string, displayName: string) => {
+  const markAsRetired = (uid: string, displayName: string) => {
     if (!orgId) return;
-    if (!confirm(`${displayName} をこの組織で退職済みにしますか？\n\n※ この組織でのアクセスができなくなります\n※ 他の組織には影響しません\n※ 過去のシフトやタイムカードは記録として残ります`)) return;
+    setConfirmModal({ isOpen: true, type: 'retire', uid, displayName });
+  };
+
+  const executeRetire = async () => {
+    const { uid, displayName } = confirmModal;
+    if (!orgId) return;
     
     setRemoving(uid);
     try {
@@ -202,9 +211,14 @@ export default function OrganizationMembersPage() {
     }
   };
 
-  const removeFromOrg = async (uid: string, displayName: string) => {
+  const removeFromOrg = (uid: string, displayName: string) => {
     if (!orgId) return;
-    if (!confirm(`${displayName} をこの組織から完全に削除しますか？\n\n※ ユーザーは組織メンバーリストから削除されます\n※ 過去のシフトやタイムカードは記録として残ります`)) return;
+    setConfirmModal({ isOpen: true, type: 'remove', uid, displayName });
+  };
+
+  const executeRemove = async () => {
+    const { uid, displayName } = confirmModal;
+    if (!orgId) return;
     
     setRemoving(uid);
     try {
@@ -534,6 +548,27 @@ export default function OrganizationMembersPage() {
           </div>
         )}
       </div>
+
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal({ isOpen: false, type: 'retire', uid: '', displayName: '' })}
+        onConfirm={() => {
+          if (confirmModal.type === 'retire') {
+            executeRetire();
+          } else {
+            executeRemove();
+          }
+        }}
+        title={confirmModal.type === 'retire' ? 'メンバー退職' : 'メンバー削除'}
+        message={
+          confirmModal.type === 'retire'
+            ? `${confirmModal.displayName} をこの組織で退職済みにしますか？\n\n※ この組織でのアクセスができなくなります\n※ 他の組織には影響しません\n※ 過去のシフトやタイムカードは記録として残ります`
+            : `${confirmModal.displayName} をこの組織から完全に削除しますか？\n\n※ ユーザーは組織メンバーリストから削除されます\n※ 過去のシフトやタイムカードは記録として残ります`
+        }
+        confirmText={confirmModal.type === 'retire' ? '退職にする' : '削除'}
+        cancelText="キャンセル"
+        variant={confirmModal.type === 'retire' ? 'warning' : 'danger'}
+      />
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { collection, doc, serverTimestamp, query, where, getDocs, updateDoc, add
 import { db } from '@/lib/firebase';
 import { Timestamp } from 'firebase/firestore';
 import JapaneseHolidays from 'japanese-holidays';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 
 type ViewMode = 'day' | 'week' | 'month';
 
@@ -48,6 +49,9 @@ export default function ShiftSubmitPage() {
   const [longPressTimer, setLongPressTimer] = useState<NodeJS.Timeout | null>(null);
   const [isLongPressActive, setIsLongPressActive] = useState(false);
   const [resizingShift, setResizingShift] = useState<{ id: string; edge: 'start' | 'end'; originalStart: string; originalEnd: string; startY: number } | null>(null);
+
+  // モーダル状態
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; shiftId: string | null }>({ isOpen: false, shiftId: null });
 
 
 
@@ -751,7 +755,15 @@ export default function ShiftSubmitPage() {
       return;
     }
 
-    if (!confirm('このシフトを削除しますか？')) return;
+    setDeleteModal({ isOpen: true, shiftId });
+  };
+
+  const handleConfirmDelete = async () => {
+    const shiftId = deleteModal.shiftId;
+    if (!shiftId) return;
+
+    const shift = shifts.find((s) => s.id === shiftId);
+    if (!shift) return;
 
     try {
       if (shift.persisted) {
@@ -768,6 +780,7 @@ export default function ShiftSubmitPage() {
         endTime: '18:00',
         note: '',
       });
+      setDeleteModal({ isOpen: false, shiftId: null });
     } catch (e) {
       console.error(e);
       alert('シフトの削除に失敗しました');
@@ -1505,6 +1518,18 @@ export default function ShiftSubmitPage() {
           </div>
         )}
       </div>
+
+      {/* 削除確認モーダル */}
+      <ConfirmModal
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ isOpen: false, shiftId: null })}
+        onConfirm={handleConfirmDelete}
+        title="シフトを削除しますか？"
+        message="この操作は取り消せません。本当に削除してもよろしいですか？"
+        confirmText="削除"
+        cancelText="キャンセル"
+        variant="danger"
+      />
     </div>
   );
 }
