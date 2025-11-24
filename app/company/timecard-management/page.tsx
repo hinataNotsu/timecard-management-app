@@ -36,6 +36,9 @@ export default function TimecardsPage() {
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; userName: string; id: string }>({ isOpen: false, userName: '', id: '' });
+  
+  // ドロップダウンメニュー状態
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && (!userProfile || !userProfile.isManage)) {
@@ -278,7 +281,7 @@ export default function TimecardsPage() {
           </button>
         </div>
 
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
+        <div className="bg-white rounded-lg shadow overflow-visible">
           <table className="w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
@@ -387,7 +390,7 @@ export default function TimecardsPage() {
                       <div className="flex gap-1 justify-center">
                         {tc.approvalStatus === 'approved' ? (
                           <span className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-500">
-                            承認済（編集不可）
+                            承認済
                           </span>
                         ) : tc.isEditing ? (
                           <>
@@ -410,25 +413,39 @@ export default function TimecardsPage() {
                             </button>
                           </>
                         ) : (
-                          <>
+                          <div className="relative">
                             <button
-                              onClick={() => toggleEdit(tc.id)}
-                              className="px-2 py-1 rounded text-xs bg-blue-600 text-white hover:bg-blue-700"
+                              onClick={() => setOpenMenuId(openMenuId === tc.id ? null : tc.id)}
+                              className="px-2 py-1 text-gray-600 hover:bg-gray-100 rounded"
                             >
-                              編集
+                              ⋮
                             </button>
-                            <button
-                              onClick={() => deleteTimecard(tc.id, tc.userName)}
-                              disabled={deleting === tc.id}
-                              className={`px-2 py-1 rounded text-xs ${
-                                deleting === tc.id
-                                  ? 'bg-gray-300 text-gray-500'
-                                  : 'bg-red-600 text-white hover:bg-red-700'
-                              }`}
-                            >
-                              {deleting === tc.id ? '削除中' : '削除'}
-                            </button>
-                          </>
+                            {openMenuId === tc.id && (
+                              <>
+                                <div className="fixed inset-0 z-40" onClick={() => setOpenMenuId(null)} />
+                                <div className="absolute right-0 mt-1 w-24 bg-white border rounded-lg shadow-lg z-50">
+                                  <button
+                                    onClick={() => {
+                                      setOpenMenuId(null);
+                                      toggleEdit(tc.id);
+                                    }}
+                                    className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 rounded-t-lg"
+                                  >
+                                    編集
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setOpenMenuId(null);
+                                      deleteTimecard(tc.id, tc.userName);
+                                    }}
+                                    className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-gray-100 rounded-b-lg"
+                                  >
+                                    削除
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
                         )}
                       </div>
                     </td>
