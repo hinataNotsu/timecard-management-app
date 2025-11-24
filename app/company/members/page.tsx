@@ -14,8 +14,6 @@ interface MemberRow {
   avatarBgColor?: string;
   transportAllowancePerShift?: number;
   hourlyWage?: number;
-  deleted?: boolean;
-  deletedAt?: Timestamp;
 }
 
 interface Request {
@@ -47,7 +45,7 @@ export default function OrganizationMembersPage() {
   const [requestsLoading, setRequestsLoading] = useState(true);
   
   // モーダル状態管理
-  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; type: 'retire' | 'remove'; uid: string; displayName: string }>({ isOpen: false, type: 'retire', uid: '', displayName: '' });
+  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; uid: string; displayName: string }>({ isOpen: false, uid: '', displayName: '' });
   
   // ...existing code...
 
@@ -114,7 +112,6 @@ export default function OrganizationMembersPage() {
         const list: MemberRow[] = usnap.docs.map((d) => {
           const u = d.data() as any;
           const settings = settingsMap.get(d.id);
-          const memberData = memberSnap.docs.find(m => m.id === d.id)?.data() as any;
           return {
             uid: u.uid || d.id,
             displayName: u.displayName || d.id,
@@ -123,8 +120,6 @@ export default function OrganizationMembersPage() {
             avatarBgColor: u.avatarBackgroundColor,
             transportAllowancePerShift: settings?.transport,
             hourlyWage: settings?.wage,
-            deleted: memberData?.deleted || false,
-            deletedAt: memberData?.deletedAt,
           };
         }).sort((a, b) => (a.displayName || a.email).localeCompare(b.displayName || b.email));
 
@@ -182,7 +177,7 @@ export default function OrganizationMembersPage() {
 
   const markAsRetired = (uid: string, displayName: string) => {
     if (!orgId) return;
-    setConfirmModal({ isOpen: true, type: 'retire', uid, displayName });
+    setConfirmModal({ isOpen: true, uid, displayName });
   };
 
   const executeRetire = async () => {
@@ -190,18 +185,18 @@ export default function OrganizationMembersPage() {
     if (!orgId) return;
     
     setRemoving(uid);
+    setConfirmModal({ isOpen: false, uid: '', displayName: '' });
+    
     try {
-      // membersサブコレクションにdeleted: trueを設定
-      await updateDoc(doc(db, 'organizations', orgId, 'members', uid), {
-        deleted: true,
-        deletedAt: Timestamp.now(),
+      // ユーザーのorganizationIdsからこの組織のIDを削除
+      const userRef = doc(db, 'users', uid);
+      await updateDoc(userRef, {
+        organizationIds: arrayRemove(orgId),
         updatedAt: Timestamp.now(),
       });
 
-      // UIを更新
-      setRows(prev => prev.map(r => 
-        r.uid === uid ? { ...r, deleted: true, deletedAt: Timestamp.now() } : r
-      ));
+      // UIから削除
+      setRows(prev => prev.filter(r => r.uid !== uid));
       alert('退職処理が完了しました');
     } catch (e: any) {
       console.error('[Members] retire error', e);
@@ -211,33 +206,7 @@ export default function OrganizationMembersPage() {
     }
   };
 
-  const removeFromOrg = (uid: string, displayName: string) => {
-    if (!orgId) return;
-    setConfirmModal({ isOpen: true, type: 'remove', uid, displayName });
-  };
 
-  const executeRemove = async () => {
-    const { uid, displayName } = confirmModal;
-    if (!orgId) return;
-    
-    setRemoving(uid);
-    try {
-      // ユーザーのorganizationIdsからこの組織のIDを削除
-      const userRef = doc(db, 'users', uid);
-      await updateDoc(userRef, {
-        organizationIds: arrayRemove(orgId)
-      });
-
-      // UI から削除
-      setRows(prev => prev.filter(r => r.uid !== uid));
-      alert('ユーザーを組織から削除しました');
-    } catch (e: any) {
-      console.error('[Members] remove error', e);
-      alert('ユーザーの削除に失敗しました');
-    } finally {
-      setRemoving(null);
-    }
-  };
 
   const handleAddUser = async () => {
     if (!orgId || !userProfile?.uid) return;
@@ -405,10 +374,10 @@ export default function OrganizationMembersPage() {
                 <tbody>
                     {loading ? (
                       <tr><td className="p-4 text-center" colSpan={7}>読み込み中...</td></tr>
-                    ) : rows.filter(r => !r.deleted).length === 0 ? (
+                    ) : rows.length === 0 ? (
                       <tr><td className="p-4 text-center" colSpan={7}>在籍メンバーがいません</td></tr>
                     ) : (
-                      rows.filter(r => !r.deleted).map((r) => (
+                      rows.map((r) => (
                       <tr key={r.uid} className="hover:bg-gray-50">
                         <td className="p-2 border-b w-12">
                           <img src={avatarUrl(r.avatarSeed || r.displayName || r.uid, r.avatarBgColor)} alt={r.displayName} className="w-8 h-8 rounded-full ring-1 ring-gray-200" />
@@ -464,48 +433,6 @@ export default function OrganizationMembersPage() {
                 </table>
               </div>
             </div>
-
-            {/* 退職済みメンバー */}
-            {rows.filter(r => r.deleted).length > 0 && (
-              <div>
-                <h2 className="text-lg font-semibold mb-3 text-gray-600">退職済みメンバー</h2>
-                <div className="bg-gray-50 rounded-lg shadow overflow-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-100">
-                      <tr>
-                        <th className="p-3 border-b text-left">氏名</th>
-                        <th className="p-3 border-b text-left">メールアドレス</th>
-                        <th className="p-3 border-b text-center">退職日</th>
-                        <th className="p-3 border-b text-center">完全削除</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.filter(r => r.deleted).map(r => (
-                        <tr key={r.uid} className="hover:bg-gray-100">
-                          <td className="p-2 border-b">
-                            <div className="flex items-center gap-2">
-                              <img src={avatarUrl(r.avatarSeed || r.displayName, r.avatarBgColor)} alt={r.displayName} className="w-8 h-8 rounded-full" />
-                              <span className="text-gray-500">(退職済み) {r.displayName}</span>
-                            </div>
-                          </td>
-                          <td className="p-2 border-b text-gray-500">{r.email}</td>
-                          <td className="p-2 border-b text-center text-gray-500">
-                            {r.deletedAt?.toDate().toLocaleDateString('ja-JP') || '-'}
-                          </td>
-                          <td className="p-2 border-b text-center">
-                            <button
-                              onClick={() => removeFromOrg(r.uid, r.displayName)}
-                              disabled={removing === r.uid}
-                              className={`px-3 py-1 rounded text-sm ${removing === r.uid ? 'bg-gray-300 text-gray-500' : 'bg-red-600 text-white hover:bg-red-700'}`}
-                            >{removing === r.uid ? '削除中' : '完全削除'}</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
           </>
         )}
 
@@ -551,23 +478,13 @@ export default function OrganizationMembersPage() {
 
       <ConfirmModal
         isOpen={confirmModal.isOpen}
-        onClose={() => setConfirmModal({ isOpen: false, type: 'retire', uid: '', displayName: '' })}
-        onConfirm={() => {
-          if (confirmModal.type === 'retire') {
-            executeRetire();
-          } else {
-            executeRemove();
-          }
-        }}
-        title={confirmModal.type === 'retire' ? 'メンバー退職' : 'メンバー削除'}
-        message={
-          confirmModal.type === 'retire'
-            ? `${confirmModal.displayName} をこの組織で退職済みにしますか？\n\n※ この組織でのアクセスができなくなります\n※ 他の組織には影響しません\n※ 過去のシフトやタイムカードは記録として残ります`
-            : `${confirmModal.displayName} をこの組織から完全に削除しますか？\n\n※ ユーザーは組織メンバーリストから削除されます\n※ 過去のシフトやタイムカードは記録として残ります`
-        }
-        confirmText={confirmModal.type === 'retire' ? '退職にする' : '削除'}
+        onClose={() => setConfirmModal({ isOpen: false, uid: '', displayName: '' })}
+        onConfirm={executeRetire}
+        title="メンバー退職"
+        message={`${confirmModal.displayName} をこの組織で退職済みにしますか？\n\n※ この組織でのアクセスができなくなります\n※ 他の組織には影響しません\n※ 過去のシフトやタイムカードは記録として残ります`}
+        confirmText="退職にする"
         cancelText="キャンセル"
-        variant={confirmModal.type === 'retire' ? 'warning' : 'danger'}
+        variant="warning"
       />
     </div>
   );
