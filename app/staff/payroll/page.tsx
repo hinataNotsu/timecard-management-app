@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { collection, doc, getDoc, getDocs, orderBy, query, where, Timestamp, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import JapaneseHolidays from 'japanese-holidays';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 
 interface TimecardRow {
   id: string;
@@ -45,6 +46,9 @@ export default function PartTimePayrollPage() {
     transportAllowancePerShift: number;
   } | null>(null);
   const [transportPerShift, setTransportPerShift] = useState<number>(0);
+
+  // モーダル状態
+  const [submitModal, setSubmitModal] = useState<{ isOpen: boolean; incompleteList?: string[] }>({ isOpen: false });
 
   useEffect(() => {
     const load = async () => {
@@ -281,14 +285,19 @@ export default function PartTimePayrollPage() {
         return `${card.dateKey}: ${issues.join('、')}`;
       });
       
-      if (!confirm(`以下のタイムカードは未完了のため申請されません:\n\n${incompleteList.join('\n')}\n\n完了済みの${completedDraftCards.length}件のタイムカードを申請しますか？`)) {
-        return;
-      }
+      setSubmitModal({ isOpen: true, incompleteList });
     } else {
-      if (!confirm(`${completedDraftCards.length}件のタイムカードを一括申請しますか？`)) {
-        return;
-      }
+      setSubmitModal({ isOpen: true });
     }
+  };
+
+  const handleConfirmSubmit = async () => {
+    const completedDraftCards = timecards.filter(t => {
+      if (t.status !== 'draft') return false;
+      if (!t.clockInAt || !t.clockOutAt) return false;
+      if (t.breakStartAt && !t.breakEndAt) return false;
+      return true;
+    });
     
     try {
       // 完了済みのドラフトカードのみを申請
@@ -299,6 +308,7 @@ export default function PartTimePayrollPage() {
         });
       }
       
+      setSubmitModal({ isOpen: false });
       alert(`${completedDraftCards.length}件の申請が完了しました`);
       // リロード
       window.location.reload();
@@ -540,6 +550,22 @@ export default function PartTimePayrollPage() {
           )}
         </div>
       </div>
+
+      {/* 一括申請確認モーダル */}
+      <ConfirmModal
+        isOpen={submitModal.isOpen}
+        onClose={() => setSubmitModal({ isOpen: false })}
+        onConfirm={handleConfirmSubmit}
+        title="タイムカードを一括申請しますか？"
+        message={
+          submitModal.incompleteList
+            ? `以下のタイムカードは未完了のため申請されません:\n\n${submitModal.incompleteList.join('\n')}\n\n完了済みのタイムカードのみ申請します。`
+            : `完了済みのタイムカードを一括申請します。よろしいですか？`
+        }
+        confirmText="申請"
+        cancelText="キャンセル"
+        variant={submitModal.incompleteList ? 'warning' : 'info'}
+      />
     </div>
   );
 }

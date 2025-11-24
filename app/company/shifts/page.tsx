@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { collection, doc, getDoc, getDocs, query, where, orderBy, updateDoc, addDoc, Timestamp as FirestoreTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Timestamp } from 'firebase/firestore';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 
 interface ShiftLabel {
   id: string;
@@ -48,6 +49,7 @@ export default function AdminShiftListPage() {
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [dayShifts, setDayShifts] = useState<ShiftRow[]>([]);
   const [dayLoading, setDayLoading] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; type: 'approve' | 'deleteLabel'; message: string; onConfirm: () => void }>({ isOpen: false, type: 'approve', message: '', onConfirm: () => {} });
   const [orgSettings, setOrgSettings] = useState<{ defaultHourlyWage: number; nightPremiumEnabled: boolean; nightPremiumRate: number; nightStart: string; nightEnd: string } | null>(null);
   const [allOrgUsers, setAllOrgUsers] = useState<{ id: string; name: string; seed?: string; bgColor?: string }[]>([]);
   const [editedShifts, setEditedShifts] = useState<Map<string, { startTime: string; endTime: string }>>(new Map());
@@ -341,7 +343,6 @@ export default function AdminShiftListPage() {
         return;
       }
     }
-    
     setSaving(true);
     try {
       for (const [shiftId, times] of editedShifts.entries()) {
@@ -1312,24 +1313,29 @@ export default function AdminShiftListPage() {
                   </button>
                   <button
                     onClick={async () => {
-                      if (confirm(`「${label.name}」を削除しますか？`)) {
-                        const updatedLabels = shiftLabels.filter(l => l.id !== label.id);
-                        setShiftLabels(updatedLabels);
-                        // Firestoreに保存
-                        if (userProfile?.currentOrganizationId) {
-                          try {
-                            await updateDoc(doc(db, 'organizations', userProfile.currentOrganizationId), {
-                              shiftLabels: updatedLabels
-                            });
-                          } catch (e) {
-                            console.error('ラベルの削除に失敗:', e);
+                      setConfirmModal({
+                        isOpen: true,
+                        type: 'deleteLabel',
+                        message: `「${label.name}」を削除しますか？`,
+                        onConfirm: async () => {
+                          const updatedLabels = shiftLabels.filter(l => l.id !== label.id);
+                          setShiftLabels(updatedLabels);
+                          // Firestoreに保存
+                          if (userProfile?.currentOrganizationId) {
+                            try {
+                              await updateDoc(doc(db, 'organizations', userProfile.currentOrganizationId), {
+                                shiftLabels: updatedLabels
+                              });
+                            } catch (e) {
+                              console.error('ラベルの削除に失敗:', e);
+                            }
+                          }
+                          // 選択中の日付のシフトを再読み込みして表示を更新
+                          if (selectedDay) {
+                            fetchDayShifts(selectedDay);
                           }
                         }
-                        // 選択中の日付のシフトを再読み込みして表示を更新
-                        if (selectedDay) {
-                          fetchDayShifts(selectedDay);
-                        }
-                      }
+                      });
                     }}
                     className="px-3 py-1 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded"
                   >
@@ -1443,6 +1449,20 @@ export default function AdminShiftListPage() {
           </div>
         </div>
       )}
+      
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal({ isOpen: false, type: 'approve', message: '', onConfirm: () => {} })}
+        onConfirm={() => {
+          confirmModal.onConfirm();
+          setConfirmModal({ isOpen: false, type: 'approve', message: '', onConfirm: () => {} });
+        }}
+        title={confirmModal.type === 'approve' ? 'シフト承認' : 'ラベル削除'}
+        message={confirmModal.message}
+        confirmText={confirmModal.type === 'approve' ? '承認' : '削除'}
+        cancelText="キャンセル"
+        variant={confirmModal.type === 'approve' ? 'info' : 'danger'}
+      />
       </div>
     </div>
   );

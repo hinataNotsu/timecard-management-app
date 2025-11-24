@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { collection, query, where, getDocs, doc, updateDoc, deleteDoc, Timestamp, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Timecard } from '@/types';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 
 interface TimecardRow {
   id: string;
@@ -34,6 +35,7 @@ export default function TimecardsPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
+  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; userName: string; id: string }>({ isOpen: false, userName: '', id: '' });
 
   useEffect(() => {
     if (!loading && (!userProfile || !userProfile.isManage)) {
@@ -191,9 +193,12 @@ export default function TimecardsPage() {
     }
   };
 
-  const deleteTimecard = async (id: string, userName: string) => {
-    if (!confirm(`${userName}のタイムカードを削除しますか？`)) return;
+  const deleteTimecard = (id: string, userName: string) => {
+    setConfirmModal({ isOpen: true, userName, id });
+  };
 
+  const executeDelete = async () => {
+    const { id } = confirmModal;
     setDeleting(id);
     try {
       await deleteDoc(doc(db, 'timecards', id));
@@ -439,6 +444,17 @@ export default function TimecardsPage() {
           <p>※ 退勤時刻を変更すると労働時間と給与が自動で再計算されます</p>
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal({ isOpen: false, userName: '', id: '' })}
+        onConfirm={executeDelete}
+        title="タイムカードの削除"
+        message={`${confirmModal.userName}のタイムカードを削除しますか？`}
+        confirmText="削除"
+        cancelText="キャンセル"
+        variant="danger"
+      />
     </div>
   );
 }

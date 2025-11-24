@@ -132,3 +132,18 @@ export interface MonthlyReport {
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
+
+// モーダルダイアログの型定義
+export type ConfirmModalVariant = 'info' | 'warning' | 'danger' | 'success';
+
+export interface ConfirmModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title: string;
+  message: string;
+  confirmText?: string;
+  cancelText?: string;
+  variant?: ConfirmModalVariant;
+  icon?: React.ReactNode;
+}
