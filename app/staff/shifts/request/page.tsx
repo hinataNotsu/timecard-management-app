@@ -290,16 +290,6 @@ export default function ShiftSubmitPage() {
         startTime: minToTime(dragStartInfo.startMin),
         endTime: minToTime(Math.min(endMin, 24 * 60))
       });
-
-      // 画面端での自動スクロール
-      const scrollThreshold = 50; // 端から50pxの範囲でスクロール
-      const scrollSpeed = 10;
-      
-      if (e.clientY < scrollThreshold) {
-        window.scrollBy(0, -scrollSpeed);
-      } else if (e.clientY > window.innerHeight - scrollThreshold) {
-        window.scrollBy(0, scrollSpeed);
-      }
     };
     
     const handleMouseUp = async () => {
@@ -502,25 +492,6 @@ export default function ShiftSubmitPage() {
   useEffect(() => {
     loadMonthShifts(currentDate);
   }, [userProfile?.uid, userProfile?.currentOrganizationId, currentDate.getFullYear(), currentDate.getMonth()]);
-
-  // ドラッグ中は画面スクロールを無効化
-  useEffect(() => {
-    if (isDragging || isLongPressActive) {
-      const scrollY = window.scrollY;
-      document.body.style.overflow = 'hidden';
-      document.body.style.position = 'fixed';
-      document.body.style.top = `-${scrollY}px`;
-      document.body.style.width = '100%';
-      
-      return () => {
-        document.body.style.overflow = '';
-        document.body.style.position = '';
-        document.body.style.top = '';
-        document.body.style.width = '';
-        window.scrollTo(0, scrollY);
-      };
-    }
-  }, [isDragging, isLongPressActive]);
 
   // カレンダー表示用の日付配列を生成
   const getCalendarDays = (date: Date): Date[] => {
@@ -904,7 +875,7 @@ export default function ShiftSubmitPage() {
                   }
                 }}
               >
-                <div className={`text-sm ${!isCurrentMonth ? 'text-gray-400' : holiday || dayOfWeek === 0 ? 'text-red-600' : dayOfWeek === 6 ? 'text-blue-600' : 'text-gray-900'} ${isToday ? 'font-bold' : ''}`}>
+                <div className={`text-sm ${!isCurrentMonth ? 'text-gray-600' : holiday || dayOfWeek === 0 ? 'text-red-600' : dayOfWeek === 6 ? 'text-blue-600' : 'text-gray-900'} ${isToday ? 'font-bold' : ''}`}>
                   {day.getDate()}
                 </div>
                 <div className="mt-1 space-y-1">
@@ -949,7 +920,7 @@ export default function ShiftSubmitPage() {
           <div className="sticky left-0 bg-gray-50 border-r border-gray-300 border-opacity-50 z-10">
             <div className="h-12 border-b border-gray-300 border-opacity-50"></div>
             {hours.map(hour => (
-              <div key={hour} className="h-12 px-2 pt-1 text-sm text-gray-600 border-b border-gray-300 border-opacity-50 flex items-start">
+              <div key={hour} className="h-12 px-2 pt-1 text-sm text-gray-800 border-b border-gray-300 border-opacity-50 flex items-start">
                 {hour}
               </div>
             ))}
@@ -967,7 +938,7 @@ export default function ShiftSubmitPage() {
               <div key={dayIndex} className="border-r border-gray-300 border-opacity-50 last:border-r-0 min-w-32" style={{ WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none' }}>
                 <div className={`h-12 p-2 border-b border-gray-300 border-opacity-50 text-center ${isToday ? 'bg-blue-50 font-bold' : 'bg-gray-50'}`}>
                   <div className={`text-xs ${
-                    holiday || dayOfWeek === 0 ? 'text-red-600' : dayOfWeek === 6 ? 'text-blue-600' : 'text-gray-600'
+                    holiday || dayOfWeek === 0 ? 'text-red-600' : dayOfWeek === 6 ? 'text-blue-600' : 'text-gray-800'
                   }`}>
                     {['日', '月', '火', '水', '木', '金', '土'][dayOfWeek]}
                   </div>
@@ -1023,16 +994,6 @@ export default function ShiftSubmitPage() {
                           startTime: minToTime(dragStartInfo.startMin),
                           endTime: minToTime(Math.min(endMin, 24 * 60 - 15)),
                         });
-
-                        // 画面端での自動スクロール
-                        const scrollThreshold = 50;
-                        const scrollSpeed = 10;
-                        
-                        if (touch.clientY < scrollThreshold) {
-                          window.scrollBy(0, -scrollSpeed);
-                        } else if (touch.clientY > window.innerHeight - scrollThreshold) {
-                          window.scrollBy(0, scrollSpeed);
-                        }
                       }}
                       onTouchEnd={() => {
                         if (longPressTimer) {
@@ -1167,7 +1128,7 @@ export default function ShiftSubmitPage() {
               時間
             </div>
             {hours.map(hour => (
-              <div key={hour} className="h-16 px-4 pt-1 text-sm text-gray-600 border-b border-gray-300 border-opacity-50 flex items-start">
+              <div key={hour} className="h-16 px-4 pt-1 text-sm text-gray-800 border-b border-gray-300 border-opacity-50 flex items-start">
                 {hour}
               </div>
             ))}
@@ -1227,16 +1188,6 @@ export default function ShiftSubmitPage() {
                       startTime: minToTime(dragStartInfo.startMin),
                       endTime: minToTime(Math.min(endMin, 24 * 60 - 15)),
                     });
-
-                    // 画面端での自動スクロール
-                    const scrollThreshold = 50;
-                    const scrollSpeed = 10;
-                    
-                    if (touch.clientY < scrollThreshold) {
-                      window.scrollBy(0, -scrollSpeed);
-                    } else if (touch.clientY > window.innerHeight - scrollThreshold) {
-                      window.scrollBy(0, scrollSpeed);
-                    }
                   }}
                   onTouchEnd={() => {
                     if (longPressTimer) {
@@ -1361,7 +1312,7 @@ export default function ShiftSubmitPage() {
             <h1 className="text-3xl font-bold text-gray-900">シフト提出</h1>
             <button
               onClick={() => router.push('/staff/dashboard')}
-              className="px-4 py-2 text-gray-600 hover:text-gray-900"
+              className="px-4 py-2 text-gray-800 hover:text-gray-900 font-medium"
             >
               ← ダッシュボードに戻る
             </button>
@@ -1458,7 +1409,7 @@ export default function ShiftSubmitPage() {
             </div>
 
             {/* シフト統計 */}
-            <div className="text-sm text-gray-600">
+            <div className="text-sm text-gray-800 font-medium">
               登録シフト: {shifts.length}件
             </div>
           </div>
