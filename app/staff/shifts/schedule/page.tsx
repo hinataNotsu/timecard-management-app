@@ -503,10 +503,10 @@ export default function ApprovedSchedulePage() {
                                   return (
                                     <div 
                                       key={segIdx}
-                                      className="absolute h-full text-white rounded-md flex items-center justify-center px-2 text-xs font-medium" 
+                                      className="absolute h-full text-white rounded-md flex items-center px-2 text-xs font-medium" 
                                       style={{ left: `${leftPct}%`, width: `${widthPct}%`, backgroundColor: bgColor }}
                                     >
-                                      <div className="truncate w-full text-center">{seg.startTime}-{seg.endTime}</div>
+                                      <div className="truncate w-full text-left">{seg.startTime}-{seg.endTime}</div>
                                     </div>
                                   );
                                 })}
