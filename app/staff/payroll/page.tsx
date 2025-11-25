@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { collection, doc, getDoc, getDocs, orderBy, query, where, Timestamp, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import JapaneseHolidays from 'japanese-holidays';
-import ConfirmModal from '@/components/modals/ConfirmModal';
+import { useToast } from '@/components/Toast';
 
 interface TimecardRow {
   id: string;
@@ -47,8 +47,11 @@ export default function PartTimePayrollPage() {
   } | null>(null);
   const [transportPerShift, setTransportPerShift] = useState<number>(0);
 
-  // モーダル状態
-  const [submitModal, setSubmitModal] = useState<{ isOpen: boolean; incompleteList?: string[] }>({ isOpen: false });
+  // モーダル状態（トーストconfirmに置換のため不要）
+  // const [submitModal, setSubmitModal] = useState<{ isOpen: boolean; incompleteList?: string[] }>({ isOpen: false });
+
+  // Toast
+  const { showSuccessToast, showErrorToast, showConfirmToast, showInfoToast } = useToast();
 
   useEffect(() => {
     const load = async () => {
@@ -264,18 +267,19 @@ export default function PartTimePayrollPage() {
 
   const handleBulkSubmit = async () => {
     if (!userProfile?.uid || !userProfile.currentOrganizationId) return;
-    
+
     if (completedDraftCards.length === 0) {
-      alert('申請可能なタイムカードがありません。出勤・退勤が完了しているタイムカードのみ申請できます。');
+      showInfoToast('申請可能なタイムカードがありません。出勤・退勤が完了しているタイムカードのみ申請できます。');
       return;
     }
-    
+
     // 未完了のドラフトカードを確認
-    const incompleteDraftCards = timecards.filter(t => 
-      t.status === 'draft' && 
+    const incompleteDraftCards = timecards.filter(t =>
+      t.status === 'draft' &&
       !completedDraftCards.some(c => c.id === t.id)
     );
-    
+
+    let confirmMessage = '';
     if (incompleteDraftCards.length > 0) {
       const incompleteList = incompleteDraftCards.map(card => {
         const issues: string[] = [];
@@ -284,10 +288,18 @@ export default function PartTimePayrollPage() {
         if (card.breakStartAt && !card.breakEndAt) issues.push('休憩終了なし');
         return `${card.dateKey}: ${issues.join('、')}`;
       });
-      
-      setSubmitModal({ isOpen: true, incompleteList });
+      confirmMessage = `以下のタイムカードは未完了のため申請されません:\n\n${incompleteList.join('\n')}\n\n完了済みのタイムカードのみ申請します。`;
     } else {
-      setSubmitModal({ isOpen: true });
+      confirmMessage = '完了済みのタイムカードを一括申請します。よろしいですか？';
+    }
+
+    const confirmed = await showConfirmToast(confirmMessage, {
+      title: 'タイムカードを一括申請しますか？',
+      confirmText: '申請',
+      cancelText: 'キャンセル',
+    });
+    if (confirmed) {
+      handleConfirmSubmit();
     }
   };
 
@@ -298,23 +310,28 @@ export default function PartTimePayrollPage() {
       if (t.breakStartAt && !t.breakEndAt) return false;
       return true;
     });
-    
+
     try {
       // 完了済みのドラフトカードのみを申請
       for (const card of completedDraftCards) {
-        await updateDoc(doc(db, 'timecards', card.id), { 
-          status: 'pending', 
-          updatedAt: Timestamp.now() 
+        await updateDoc(doc(db, 'timecards', card.id), {
+          status: 'pending',
+          updatedAt: Timestamp.now()
         });
       }
-      
-      setSubmitModal({ isOpen: false });
-      alert(`${completedDraftCards.length}件の申請が完了しました`);
-      // リロード
-      window.location.reload();
+
+      // 成功トースト
+      showSuccessToast(`${completedDraftCards.length}件の申請が完了しました`);
+
+      // ステート更新で再取得
+      setTimecards(prev => prev.map(tc =>
+        completedDraftCards.some(c => c.id === tc.id)
+          ? { ...tc, status: 'pending', updatedAt: Timestamp.now() }
+          : tc
+      ));
     } catch (e) {
       console.error('[Payroll] bulk submit error', e);
-      alert('申請に失敗しました');
+      showErrorToast('申請に失敗しました');
     }
   };
 
@@ -335,8 +352,14 @@ export default function PartTimePayrollPage() {
               </svg>
               <div className="flex-1">
                 <p className="font-semibold text-yellow-800">{error}</p>
-                <button 
-                  onClick={() => window.location.reload()} 
+                <button
+                  onClick={() => {
+                    setLoading(true);
+                    setError(null);
+                    // 再取得
+                    const d = new Date(selectedMonth);
+                    setSelectedMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+                  }}
                   className="mt-2 px-3 py-1 text-sm rounded bg-yellow-600 text-white hover:bg-yellow-700"
                 >
                   再読み込み
@@ -551,21 +574,7 @@ export default function PartTimePayrollPage() {
         </div>
       </div>
 
-      {/* 一括申請確認モーダル */}
-      <ConfirmModal
-        isOpen={submitModal.isOpen}
-        onClose={() => setSubmitModal({ isOpen: false })}
-        onConfirm={handleConfirmSubmit}
-        title="タイムカードを一括申請しますか？"
-        message={
-          submitModal.incompleteList
-            ? `以下のタイムカードは未完了のため申請されません:\n\n${submitModal.incompleteList.join('\n')}\n\n完了済みのタイムカードのみ申請します。`
-            : `完了済みのタイムカードを一括申請します。よろしいですか？`
-        }
-        confirmText="申請"
-        cancelText="キャンセル"
-        variant={submitModal.incompleteList ? 'warning' : 'info'}
-      />
+      {/* 一括申請確認モーダルはトーストconfirmに統一のため削除 */}
     </div>
   );
 }

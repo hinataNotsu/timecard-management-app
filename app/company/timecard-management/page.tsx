@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { collection, query, where, getDocs, doc, updateDoc, deleteDoc, Timestamp, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Timecard } from '@/types';
-import ConfirmModal from '@/components/modals/ConfirmModal';
+import { useToast, ToastProvider } from '@/components/Toast';
 
 interface TimecardRow {
   id: string;
@@ -35,7 +35,7 @@ export default function TimecardsPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
-  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; userName: string; id: string }>({ isOpen: false, userName: '', id: '' });
+  const { showSuccessToast, showErrorToast, showConfirmToast } = useToast();
   
   // ドロップダウンメニュー状態
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -187,29 +187,30 @@ export default function TimecardsPage() {
         } : tc
       ));
 
-      alert('保存しました');
+      showSuccessToast('保存しました');
     } catch (error) {
       console.error('[Timecards] Error saving timecard:', error);
-      alert('保存に失敗しました');
+      showErrorToast('保存に失敗しました');
     } finally {
       setSaving(null);
     }
   };
 
-  const deleteTimecard = (id: string, userName: string) => {
-    setConfirmModal({ isOpen: true, userName, id });
-  };
-
-  const executeDelete = async () => {
-    const { id } = confirmModal;
+  const deleteTimecard = async (id: string, userName: string) => {
+    const confirmed = await showConfirmToast(`${userName}のタイムカードを削除しますか？`, {
+      title: 'タイムカードの削除',
+      confirmText: '削除',
+      cancelText: 'キャンセル',
+    });
+    if (!confirmed) return;
     setDeleting(id);
     try {
       await deleteDoc(doc(db, 'timecards', id));
       setTimecards(prev => prev.filter(tc => tc.id !== id));
-      alert('削除しました');
+      showSuccessToast('削除しました');
     } catch (error) {
       console.error('[Timecards] Error deleting timecard:', error);
-      alert('削除に失敗しました');
+      showErrorToast('削除に失敗しました');
     } finally {
       setDeleting(null);
     }
@@ -462,16 +463,7 @@ export default function TimecardsPage() {
         </div>
       </div>
 
-      <ConfirmModal
-        isOpen={confirmModal.isOpen}
-        onClose={() => setConfirmModal({ isOpen: false, userName: '', id: '' })}
-        onConfirm={executeDelete}
-        title="タイムカードの削除"
-        message={`${confirmModal.userName}のタイムカードを削除しますか？`}
-        confirmText="削除"
-        cancelText="キャンセル"
-        variant="danger"
-      />
+      {/* ConfirmModalは不要。トーストでconfirmを表示 */}
     </div>
   );
 }
