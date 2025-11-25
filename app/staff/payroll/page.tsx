@@ -51,7 +51,7 @@ export default function PartTimePayrollPage() {
   // const [submitModal, setSubmitModal] = useState<{ isOpen: boolean; incompleteList?: string[] }>({ isOpen: false });
 
   // Toast
-  const { showSuccessToast, showErrorToast, showConfirmToast } = useToast();
+  const { showSuccessToast, showErrorToast, showConfirmToast, showInfoToast } = useToast();
 
   useEffect(() => {
     const load = async () => {
