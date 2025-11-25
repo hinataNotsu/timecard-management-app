@@ -122,7 +122,7 @@ export default function CompanySignUpPage() {
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
             既にアカウントをお持ちですか？{' '}
-            <Link href="/login/company" className="font-medium text-blue-600 hover:text-blue-500">
+            <Link href="../login/company" className="font-medium text-blue-600 hover:text-blue-500">
               ログイン
             </Link>
           </p>

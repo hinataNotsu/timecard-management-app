@@ -42,12 +42,18 @@ export default function ProfilePage() {
           setDisplayName(u.displayName || '');
           setEmail(u.email || userProfile.email || '');
           setPhoneNumber(u.phoneNumber || '');
-          setAvatarSeed(u.avatarSeed || (u.displayName || userProfile.uid));
+          // onboarding=1パラメータがある場合はemailの@前をavatarSeed初期値に
+          const params = new URLSearchParams(window.location.search);
+          const isOnboardingParam = params.get('onboarding') === '1';
+          if (isOnboardingParam && (u.email || userProfile.email)) {
+            const mail = u.email || userProfile.email;
+            setAvatarSeed(mail.split('@')[0]);
+          } else {
+            setAvatarSeed(u.avatarSeed || (u.displayName || userProfile.uid));
+          }
           setAvatarBackgroundColor(u.avatarBackgroundColor || '');
           setIsOnboarding(!u.profileCompleted);
-          
           // URLパラメータまたはrequirePasswordChangeフラグをチェック
-          const params = new URLSearchParams(window.location.search);
           const needPassword = params.get('passwordChangeRequired') === 'true' || u.requirePasswordChange;
           const needProfile = !u.profileCompleted;
           if (needPassword) {
@@ -61,7 +67,14 @@ export default function ProfilePage() {
         } else {
           setDisplayName(userProfile.displayName || '');
           setEmail(userProfile.email || '');
-          setAvatarSeed(userProfile.displayName || userProfile.uid);
+          // onboarding=1パラメータがある場合はemailの@前をavatarSeed初期値に
+          const params = new URLSearchParams(window.location.search);
+          const isOnboardingParam = params.get('onboarding') === '1';
+          if (isOnboardingParam && userProfile.email) {
+            setAvatarSeed(userProfile.email.split('@')[0]);
+          } else {
+            setAvatarSeed(userProfile.displayName || userProfile.uid);
+          }
           setIsOnboarding(true);
           setOnboardingStep('profile');
         }
@@ -225,7 +238,7 @@ export default function ProfilePage() {
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
             <img src={avatarUrl(avatarSeed || displayName || userProfile.uid, avatarBackgroundColor)} alt="avatar" className="w-16 h-16 rounded-full ring-1 ring-gray-200" />
             <div className="flex-1">
-              <p className="text-sm text-gray-600">プレビュー（DiceBear）</p>
+              <p className="text-sm text-gray-600">プレビュー</p>
               <p className="text-xs text-gray-500">表示名/シードを変更すると自動で更新されます</p>
             </div>
           </div>
@@ -282,7 +295,7 @@ export default function ProfilePage() {
                 value={avatarBackgroundColor}
                 onChange={(e) => setAvatarBackgroundColor(e.target.value)}
                 className="flex-1 px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="例: FF5733, blue, rgb(100,150,200)"
+                placeholder="例: FF5733"
               />
               <input
                 type="color"
