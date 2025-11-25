@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useToast } from '@/components/Toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { collection, doc, getDoc, query, where, Timestamp, setDoc, updateDoc, getDocs } from 'firebase/firestore';
@@ -22,6 +23,7 @@ interface TimecardRecord {
 }
 
 export default function TimecardPage() {
+  const { showErrorToast } = useToast();
   const { userProfile } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -208,7 +210,7 @@ export default function TimecardPage() {
       setRecord(next);
     } catch (e) {
       console.error('[Timecard] update error', e);
-      alert('打刻に失敗しました');
+      showErrorToast('打刻に失敗しました');
     }
   };
 

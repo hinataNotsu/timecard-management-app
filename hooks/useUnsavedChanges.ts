@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useCallback, useRef } from 'react';
+import { useToast } from '@/components/Toast';
 import { useRouter } from 'next/navigation';
 
 /**
@@ -40,12 +41,20 @@ export function useUnsavedChanges(
   }, [hasUnsavedChanges]);
 
   // Next.jsのルーティング変更を検知してconfirmダイアログを表示
-  const handleRouteChange = useCallback(() => {
+  const { showConfirmToast } = useToast();
+
+  // ルーティング変更時の確認（Promiseで返す）
+  const handleRouteChange = useCallback(async () => {
     if (hasUnsavedChanges) {
-      return window.confirm(messageRef.current);
+      const confirmed = await showConfirmToast(messageRef.current, {
+        title: '確認',
+        confirmText: '離れる',
+        cancelText: 'キャンセル',
+      });
+      return confirmed;
     }
     return true;
-  }, [hasUnsavedChanges]);
+  }, [hasUnsavedChanges, showConfirmToast]);
 
   return { handleRouteChange };
 }

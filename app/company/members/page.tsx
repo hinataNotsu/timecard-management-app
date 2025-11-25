@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { collection, doc, getDoc, getDocs, query, updateDoc, where, setDoc, deleteDoc, Timestamp, arrayRemove, arrayUnion } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import ConfirmModal from '@/components/modals/ConfirmModal';
+import { useToast, ToastProvider } from '@/components/Toast';
 
 interface MemberRow {
   uid: string;
@@ -44,7 +44,7 @@ export default function OrganizationMembersPage() {
   const [requestsLoading, setRequestsLoading] = useState(true);
   
   // モーダル状態管理
-  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; uid: string; displayName: string }>({ isOpen: false, uid: '', displayName: '' });
+  const { showSuccessToast, showErrorToast, showConfirmToast } = useToast();
   
   // ドロップダウンメニュー状態
   const [openMenuUid, setOpenMenuUid] = useState<string | null>(null);
@@ -156,18 +156,18 @@ export default function OrganizationMembersPage() {
     fetchRequests();
   }, [orgId]);
 
-  const markAsRetired = (uid: string, displayName: string) => {
+  const markAsRetired = async (uid: string, displayName: string) => {
     if (!orgId) return;
-    setConfirmModal({ isOpen: true, uid, displayName });
-  };
-
-  const executeRetire = async () => {
-    const { uid, displayName } = confirmModal;
-    if (!orgId) return;
-    
+    const confirmed = await showConfirmToast(
+      `${displayName} をこの組織で退職済みにしますか？\n\n※ この組織でのアクセスができなくなります\n※ 他の組織には影響しません\n※ 過去のシフトやタイムカードは記録として残ります`,
+      {
+        title: 'メンバー退職',
+        confirmText: '退職にする',
+        cancelText: 'キャンセル',
+      }
+    );
+    if (!confirmed) return;
     setRemoving(uid);
-    setConfirmModal({ isOpen: false, uid: '', displayName: '' });
-    
     try {
       // ユーザーのorganizationIdsからこの組織のIDを削除
       const userRef = doc(db, 'users', uid);
@@ -175,13 +175,12 @@ export default function OrganizationMembersPage() {
         organizationIds: arrayRemove(orgId),
         updatedAt: Timestamp.now(),
       });
-
       // UIから削除
       setRows(prev => prev.filter(r => r.uid !== uid));
-      alert('退職処理が完了しました');
+      showSuccessToast('退職処理が完了しました');
     } catch (e: any) {
       console.error('[Members] retire error', e);
-      alert('退職処理に失敗しました');
+      showErrorToast('退職処理に失敗しました');
     } finally {
       setRemoving(null);
     }
@@ -229,19 +228,43 @@ export default function OrganizationMembersPage() {
         throw new Error(errorMsg + details);
       }
 
-      alert(`ユーザーを作成しました\n\nメール: ${result.email}\n初回ログイン後にパスワード変更を促します。`);
-      
+      showSuccessToast(`ユーザーを作成しました\n\nメール: ${result.email}\n初回ログイン後にパスワード変更を促します。`);
       // フォームをリセット
       setNewUserEmail('');
       setNewUserPassword('');
       setNewUserDisplayName('');
       setShowAddUser(false);
-      
-      // リロード
-      window.location.reload();
+      // メンバー再取得
+      if (orgId) {
+        const uq = query(collection(db, 'users'), where('organizationIds', 'array-contains', orgId));
+        const usnap = await getDocs(uq);
+        const memberSnap = await getDocs(collection(db, 'organizations', orgId, 'members'));
+        const settingsMap = new Map<string, { transport?: number; wage?: number }>();
+        memberSnap.forEach((d) => {
+          const data = d.data() as any;
+          settingsMap.set(d.id, {
+            transport: typeof data.transportAllowancePerShift === 'number' ? data.transportAllowancePerShift : undefined,
+            wage: typeof data.hourlyWage === 'number' ? data.hourlyWage : undefined,
+          });
+        });
+        const list: MemberRow[] = usnap.docs.map((d) => {
+          const u = d.data() as any;
+          const settings = settingsMap.get(d.id);
+          return {
+            uid: u.uid || d.id,
+            displayName: u.displayName || d.id,
+            email: u.email || '',
+            avatarSeed: u.avatarSeed || u.displayName || d.id,
+            avatarBgColor: u.avatarBackgroundColor,
+            transportAllowancePerShift: settings?.transport,
+            hourlyWage: settings?.wage,
+          };
+        }).sort((a, b) => (a.displayName || a.email).localeCompare(b.displayName || b.email));
+        setRows(list);
+      }
     } catch (e: any) {
       console.error('[Members] add user error', e);
-      alert(e.message || 'ユーザーの作成に失敗しました');
+      showErrorToast(e.message || 'ユーザーの作成に失敗しました');
     } finally {
       setAdding(false);
     }
@@ -265,10 +288,10 @@ export default function OrganizationMembersPage() {
       const newList = permissionList.filter((p: any) => p.uid !== req.uid);
       await updateDoc(orgDocRef, { permissionList: newList });
       setRequests((prev) => prev.filter((r) => r.uid !== req.uid));
-      alert('申請を承認しました');
+      showSuccessToast('申請を承認しました');
     } catch (e) {
       console.error('[Requests] approve error', e);
-      alert('申請の承認に失敗しました');
+      showErrorToast('申請の承認に失敗しました');
     }
   };
 
@@ -284,10 +307,10 @@ export default function OrganizationMembersPage() {
       const newList = permissionList.filter((p: any) => p.uid !== req.uid);
       await updateDoc(orgDocRef, { permissionList: newList });
       setRequests((prev) => prev.filter((r) => r.uid !== req.uid));
-      alert('申請を削除しました');
+      showSuccessToast('申請を削除しました');
     } catch (e) {
       console.error('[Requests] reject error', e);
-      alert('申請の削除に失敗しました');
+      showErrorToast('申請の削除に失敗しました');
     }
   };
 
@@ -453,16 +476,7 @@ export default function OrganizationMembersPage() {
         )}
       </div>
 
-      <ConfirmModal
-        isOpen={confirmModal.isOpen}
-        onClose={() => setConfirmModal({ isOpen: false, uid: '', displayName: '' })}
-        onConfirm={executeRetire}
-        title="メンバー退職"
-        message={`${confirmModal.displayName} をこの組織で退職済みにしますか？\n\n※ この組織でのアクセスができなくなります\n※ 他の組織には影響しません\n※ 過去のシフトやタイムカードは記録として残ります`}
-        confirmText="退職にする"
-        cancelText="キャンセル"
-        variant="warning"
-      />
+      {/* ConfirmModalは不要。トーストでconfirmを表示 */}
     </div>
   );
 }
