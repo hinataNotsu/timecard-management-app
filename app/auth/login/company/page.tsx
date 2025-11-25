@@ -77,7 +77,7 @@ export default function CompanyLoginPage() {
               <p className="text-sm text-red-800">{error}</p>
             </div>
           )}
-          <div className="rounded-md shadow-sm space-y-4">
+          <div className="rounded-md space-y-4">
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
                 メールアドレス
