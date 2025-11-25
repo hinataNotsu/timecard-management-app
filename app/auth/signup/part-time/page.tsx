@@ -54,7 +54,7 @@ export default function PartTimeSignUpPage() {
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">アルバイト新規会員登録</h2>
           <p className="mt-2 text-center text-sm text-gray-600">
             既にアカウントをお持ちの方は{' '}
-            <Link href="/login/part-time" className="font-medium text-blue-600 hover:text-blue-500">ログイン</Link>
+            <Link href="../login/part-time" className="font-medium text-blue-600 hover:text-blue-500">ログイン</Link>
           </p>
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>

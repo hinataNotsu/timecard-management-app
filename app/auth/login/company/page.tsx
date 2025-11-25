@@ -66,7 +66,7 @@ export default function CompanyLoginPage() {
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
             アカウントをお持ちでない方は{' '}
-            <Link href="/signup/company" className="font-medium text-blue-600 hover:text-blue-500">
+            <Link href="../signup/company" className="font-medium text-blue-600 hover:text-blue-500">
               新規登録
             </Link>
           </p>
