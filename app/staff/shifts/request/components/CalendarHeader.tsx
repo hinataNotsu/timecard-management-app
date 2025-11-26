@@ -45,12 +45,12 @@ export const CalendarHeader = memo(function CalendarHeader({
   return (
     <div className="mb-6">
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-3xl font-bold text-gray-900">シフト提出</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">シフト提出</h1>
         <button
           onClick={onBackClick}
-          className="px-4 py-2 text-gray-600 hover:text-gray-900"
+          className="px-2 sm:px-4 py-2 text-sm sm:text-base text-gray-600 hover:text-gray-900"
         >
-          ← ダッシュボードに戻る
+          ← 戻る
         </button>
       </div>
 
@@ -60,20 +60,20 @@ export const CalendarHeader = memo(function CalendarHeader({
           <p className="text-sm text-blue-800">📅 {deadlineMessage}</p>
         </div>
       ) : (
-        <div className="bg-gray-100 border border-gray-300 rounded-lg p-3 mb-4">
-          <p className="text-sm text-gray-600">🔒 {deadlineMessage}</p>
+        <div className="bg-red-50 border border-red-300 rounded-lg p-3 mb-4">
+          <p className="text-sm text-red-700">🔒 {deadlineMessage}</p>
         </div>
       )}
 
       {/* コントロール */}
-      <div className="flex flex-wrap items-center gap-4 mb-4">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-4">
         {/* ビューモード切替 */}
         <div className="flex rounded-md overflow-hidden border">
           {(['month', 'week', 'day'] as ViewMode[]).map((mode) => (
             <button
               key={mode}
               onClick={() => onViewModeChange(mode)}
-              className={`px-4 py-2 text-sm ${viewMode === mode ? 'bg-blue-500 text-white' : 'bg-white hover:bg-gray-50'}`}
+              className={`px-3 sm:px-4 py-2 text-sm ${viewMode === mode ? 'bg-blue-500 text-white' : 'bg-white hover:bg-gray-50'}`}
             >
               {mode === 'month' ? '月' : mode === 'week' ? '週' : '日'}
             </button>
@@ -81,35 +81,35 @@ export const CalendarHeader = memo(function CalendarHeader({
         </div>
 
         {/* ナビゲーション */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2">
           <button
             onClick={() => onNavigate('prev')}
-            className="px-3 py-2 border rounded-md hover:bg-gray-50"
+            className="px-2 sm:px-3 py-2 border rounded-md hover:bg-gray-50"
           >
             ←
           </button>
           <button
             onClick={() => onNavigate('today')}
-            className="px-3 py-2 border rounded-md hover:bg-gray-50"
+            className="px-2 sm:px-3 py-2 border rounded-md hover:bg-gray-50 text-sm"
           >
             今日
           </button>
           <button
             onClick={() => onNavigate('next')}
-            className="px-3 py-2 border rounded-md hover:bg-gray-50"
+            className="px-2 sm:px-3 py-2 border rounded-md hover:bg-gray-50"
           >
             →
           </button>
         </div>
 
         {/* 日付表示 */}
-        <span className="text-lg font-semibold">{getDisplayDate()}</span>
+        <span className="text-base sm:text-lg font-semibold">{getDisplayDate()}</span>
 
         {/* ステータスフィルター */}
         <select
           value={statusFilter}
           onChange={(e) => onStatusFilterChange(e.target.value as StatusFilter)}
-          className="border rounded-md px-3 py-2"
+          className="border rounded-md px-2 sm:px-3 py-2 text-sm"
         >
           <option value="all">すべて</option>
           <option value="pending">未承認</option>
