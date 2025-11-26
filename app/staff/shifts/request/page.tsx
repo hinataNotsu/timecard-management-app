@@ -982,6 +982,10 @@ export default function ShiftSubmitPage() {
                           setLongPressTimer(null);
                         }
                         if (!isLongPressActive || !isDragging || !dragStartInfo) return;
+                        
+                        // 長押しドラッグ中はスクロールを防止
+                        e.preventDefault();
+                        
                         const touch = e.touches[0];
                         const deltaY = touch.clientY - dragStartInfo.startY;
                         const deltaMin = Math.round((deltaY / 48) * 60 / 15) * 15;
@@ -1173,6 +1177,10 @@ export default function ShiftSubmitPage() {
                       setLongPressTimer(null);
                     }
                     if (!isLongPressActive || !isDragging || !dragStartInfo) return;
+                    
+                    // 長押しドラッグ中はスクロールを防止
+                    e.preventDefault();
+                    
                     const touch = e.touches[0];
                     const deltaY = touch.clientY - dragStartInfo.startY;
                     const deltaMin = Math.round((deltaY / 64) * 60 / 15) * 15;
