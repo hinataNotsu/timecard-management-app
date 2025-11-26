@@ -7,20 +7,27 @@ import { useRouter } from 'next/navigation';
 import { collection, doc, getDoc, query, where, Timestamp, setDoc, updateDoc, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
+// 休憩期間の型
+interface BreakPeriod {
+  startAt: Timestamp;
+  endAt?: Timestamp;
+}
+
 interface TimecardRecord {
   id: string;
   dateKey: string; // YYYY-MM-DD
   organizationId: string;
   userId: string;
   clockInAt?: Timestamp;
-  breakStartAt?: Timestamp;
-  breakEndAt?: Timestamp;
+  breaks: BreakPeriod[]; // 複数休憩対応（最大5回）
   clockOutAt?: Timestamp;
   hourlyWage?: number;
   status: 'draft' | 'pending' | 'approved' | 'rejected';
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
+
+const MAX_BREAKS = 5; // 休憩回数の上限
 
 export default function TimecardPage() {
   const { showErrorToast } = useToast();
@@ -33,7 +40,6 @@ export default function TimecardPage() {
 
   // live clock
   useEffect(() => {
-    // 初回マウント時に現在時刻を設定し、その後は1秒ごとに更新
     setNow(new Date());
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
@@ -47,7 +53,7 @@ export default function TimecardPage() {
         const orgDoc = await getDoc(doc(db, 'organizations', userProfile.currentOrganizationId));
         if (orgDoc.exists()) {
           const orgData = orgDoc.data();
-          const watchAdmin = orgData.isWatchAdmin !== false; // デフォルトtrue
+          const watchAdmin = orgData.isWatchAdmin !== false;
           setIsWatchAdmin(watchAdmin);
         }
       } catch (error) {
@@ -57,122 +63,82 @@ export default function TimecardPage() {
     checkOrgSettings();
   }, [userProfile?.currentOrganizationId]);
 
-  // access control
+  // isWatchAdminがtrueの場合、管理者側で打刻するためリダイレクト
   useEffect(() => {
-    if (!userProfile) return;
-    
-    // isWatchAdminの読み込みが完了するまで待つ
-    if (isWatchAdmin === null) return;
-    
-    // isWatchAdminがtrueの場合、アルバイトはタイムカードにアクセスできない
-    // ただし管理者(isManage=true)は除外
-    if (isWatchAdmin === true && !userProfile.isManage) {
+    if (isWatchAdmin === true) {
       router.push('/staff/dashboard');
     }
-  }, [userProfile, isWatchAdmin, router]);
+  }, [isWatchAdmin, router]);
 
-  const dateKey = useMemo(() => {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  }, []);
-
-  // load today's latest incomplete timecard
+  // fetch or create today's record
   useEffect(() => {
     const load = async () => {
-      if (!userProfile?.uid || !userProfile.currentOrganizationId) return;
-      setLoading(true);
-      try {
-        const qy = query(
-          collection(db, 'timecards'),
-          where('organizationId', '==', userProfile.currentOrganizationId),
-          where('userId', '==', userProfile.uid),
-          where('dateKey', '==', dateKey)
-        );
-        const snap = await getDocs(qy);
-        // 最新の未完了タイムカード（clockOutAtがないもの）を優先、なければ最新のもの
-        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as TimecardRecord));
-        const incomplete = docs.find(d => !d.clockOutAt);
-        if (incomplete) {
-          setRecord(incomplete);
-        } else if (docs.length > 0 && docs.length < 5) {
-          // 完了済みが5件未満なら新規作成可能な状態（レコードなし）
-          setRecord(null);
-        } else if (docs.length > 0) {
-          // 5件以上ある場合は最新のものを表示（createdAtでソート）
-          const sorted = docs.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
-          setRecord(sorted[0]);
-        }
-      } catch (e: any) {
-        console.error('[Timecard] load error', e);
-      } finally {
+      if (!userProfile?.currentOrganizationId || !userProfile?.uid) {
         setLoading(false);
+        return;
       }
+      const dateKey = new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-');
+      const q = query(
+        collection(db, 'timecards'),
+        where('organizationId', '==', userProfile.currentOrganizationId),
+        where('userId', '==', userProfile.uid),
+        where('dateKey', '==', dateKey)
+      );
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const d = snap.docs[0];
+        const data = d.data();
+        setRecord({
+          id: d.id,
+          dateKey: data.dateKey,
+          organizationId: data.organizationId,
+          userId: data.userId,
+          clockInAt: data.clockInAt,
+          breaks: data.breaks || [], // 配列がない場合は空配列
+          clockOutAt: data.clockOutAt,
+          hourlyWage: data.hourlyWage,
+          status: data.status || 'draft',
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt
+        });
+      }
+      setLoading(false);
     };
     load();
-  }, [userProfile?.uid, userProfile?.currentOrganizationId, dateKey]);
+  }, [userProfile?.currentOrganizationId, userProfile?.uid]);
 
   const ensureRecord = async (): Promise<TimecardRecord> => {
-    if (record && !record.clockOutAt) {
-      console.debug('[Timecard][ensureRecord] Reuse existing draft', {
-        id: record.id,
-        hourlyWage: (record as any)?.hourlyWage,
-        clockInAt: (record as any)?.clockInAt?.toDate?.()?.toISOString?.(),
-        clockOutAt: (record as any)?.clockOutAt?.toDate?.()?.toISOString?.(),
-      });
-      return record; // 未完了のタイムカードがあればそれを使う
+    if (record) return record;
+    if (!userProfile?.currentOrganizationId || !userProfile?.uid) {
+      throw new Error('ログインが必要です');
     }
-    if (!userProfile?.uid || !userProfile.currentOrganizationId) throw new Error('missing user/org');
-    // 今日のタイムカード件数をチェック（5件制限）
-    const qy = query(
-      collection(db, 'timecards'),
-      where('organizationId', '==', userProfile.currentOrganizationId),
-      where('userId', '==', userProfile.uid),
-      where('dateKey', '==', dateKey)
-    );
-    const snap = await getDocs(qy);
-    const count = snap.docs.length;
-    if (count >= 5) {
-      throw new Error('本日は既に5回出退勤しています。これ以上打刻できません。');
-    }
-    console.debug('[Timecard][ensureRecord] Resolve hourlyWage start', {
-      uid: userProfile.uid,
-      orgId: userProfile.currentOrganizationId,
-    });
-    // ユーザー別時給取得（なければ組織デフォルト）
-    let wage: number | undefined;
-    let debugSource: 'member' | 'org' | 'fallback' = 'fallback';
+    const dateKey = new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-');
+    
+    // 時給を取得
+    let wage = 1100;
+    let debugSource = 'default';
     try {
-      const memberPath = ['organizations', userProfile.currentOrganizationId, 'members', userProfile.uid].join('/');
-      console.debug('[Timecard][ensureRecord] Read member doc', { path: memberPath });
-      const memberSnap = await getDoc(doc(db, 'organizations', userProfile.currentOrganizationId, 'members', userProfile.uid));
-      if (memberSnap.exists()) {
-        const raw = memberSnap.data() as any;
-        const w = raw?.hourlyWage;
-        const num = typeof w === 'number' ? w : Number(w);
-        console.debug('[Timecard][ensureRecord] Member wage', { raw: w, parsed: num });
+      // メンバーシップから時給を取得
+      const memRef = doc(db, 'organizations', userProfile.currentOrganizationId, 'members', userProfile.uid);
+      const memSnap = await getDoc(memRef);
+      if (memSnap.exists()) {
+        const hw = memSnap.data()?.hourlyWage;
+        const num = typeof hw === 'string' ? parseInt(hw, 10) : Number(hw);
         if (num && !Number.isNaN(num) && num > 0) {
           wage = num;
           debugSource = 'member';
         }
       }
-      if (!wage) {
-        const orgPath = ['organizations', userProfile.currentOrganizationId].join('/');
-        console.debug('[Timecard][ensureRecord] Read org doc', { path: orgPath });
+      // メンバーシップになければ組織デフォルト
+      if (debugSource === 'default') {
         const orgSnap = await getDoc(doc(db, 'organizations', userProfile.currentOrganizationId));
         if (orgSnap.exists()) {
-          const d = orgSnap.data() as any;
-          const dw = d?.defaultHourlyWage;
-          const num = typeof dw === 'number' ? dw : Number(dw);
-          console.debug('[Timecard][ensureRecord] Org default wage', { raw: dw, parsed: num });
+          const dw = orgSnap.data()?.defaultHourlyWage;
+          const num = typeof dw === 'string' ? parseInt(dw, 10) : Number(dw);
           if (num && !Number.isNaN(num) && num > 0) {
             wage = num;
             debugSource = 'org';
           }
-        } else {
-          console.debug('[Timecard][ensureRecord] Org doc not found');
         }
       }
     } catch (e: any) {
@@ -181,66 +147,175 @@ export default function TimecardPage() {
       debugSource = 'fallback';
     }
     if (!wage) { wage = 1100; debugSource = 'fallback'; }
-    console.debug('[Timecard][ensureRecord] Resolved hourlyWage', { wage, source: debugSource });
+
     const ref = doc(collection(db, 'timecards'));
     const base: TimecardRecord = {
       id: ref.id,
       dateKey,
       organizationId: userProfile.currentOrganizationId,
       userId: userProfile.uid,
+      breaks: [], // 空の配列で初期化
       hourlyWage: wage,
       status: 'draft',
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now()
     };
-    console.debug('[Timecard][ensureRecord] Creating new timecard', { id: ref.id, hourlyWage: wage, source: debugSource });
     await setDoc(ref, base);
     setRecord(base);
     return base;
   };
 
-  const updateField = async (field: keyof Omit<TimecardRecord,'id'|'dateKey'|'organizationId'|'userId'|'createdAt'|'updatedAt'>) => {
+  // 出勤打刻
+  const clockIn = async () => {
     try {
       const rec = await ensureRecord();
-      if (rec[field]) return; // already set
+      if (rec.clockInAt) return;
       const ref = doc(db, 'timecards', rec.id);
-      const patch: any = { [field]: Timestamp.now(), updatedAt: Timestamp.now() };
+      const patch = { clockInAt: Timestamp.now(), updatedAt: Timestamp.now() };
       await updateDoc(ref, patch);
-      const next = { ...rec, ...patch } as TimecardRecord;
-      setRecord(next);
+      setRecord({ ...rec, ...patch });
     } catch (e) {
-      console.error('[Timecard] update error', e);
-      showErrorToast('打刻に失敗しました');
+      console.error('[Timecard] clockIn error', e);
+      showErrorToast('出勤打刻に失敗しました');
     }
   };
 
-  // derived durations
+  // 休憩開始
+  const breakStart = async () => {
+    try {
+      const rec = await ensureRecord();
+      if (!rec.clockInAt || rec.clockOutAt) return;
+      
+      // 現在休憩中かチェック（最後の休憩にendAtがない場合）
+      const lastBreak = rec.breaks[rec.breaks.length - 1];
+      if (lastBreak && !lastBreak.endAt) return;
+      
+      // 休憩回数上限チェック
+      if (rec.breaks.length >= MAX_BREAKS) {
+        showErrorToast(`休憩は最大${MAX_BREAKS}回までです`);
+        return;
+      }
+
+      const newBreak: BreakPeriod = { startAt: Timestamp.now() };
+      const updatedBreaks = [...rec.breaks, newBreak];
+      
+      const ref = doc(db, 'timecards', rec.id);
+      const patch = { breaks: updatedBreaks, updatedAt: Timestamp.now() };
+      await updateDoc(ref, patch);
+      setRecord({ ...rec, breaks: updatedBreaks, updatedAt: Timestamp.now() });
+    } catch (e) {
+      console.error('[Timecard] breakStart error', e);
+      showErrorToast('休憩開始に失敗しました');
+    }
+  };
+
+  // 休憩終了
+  const breakEnd = async () => {
+    try {
+      const rec = await ensureRecord();
+      if (rec.breaks.length === 0) return;
+      
+      const lastBreak = rec.breaks[rec.breaks.length - 1];
+      if (!lastBreak || lastBreak.endAt) return; // 休憩中でない
+      
+      const updatedBreaks = rec.breaks.map((b, i) => 
+        i === rec.breaks.length - 1 ? { ...b, endAt: Timestamp.now() } : b
+      );
+      
+      const ref = doc(db, 'timecards', rec.id);
+      const patch = { breaks: updatedBreaks, updatedAt: Timestamp.now() };
+      await updateDoc(ref, patch);
+      setRecord({ ...rec, breaks: updatedBreaks, updatedAt: Timestamp.now() });
+    } catch (e) {
+      console.error('[Timecard] breakEnd error', e);
+      showErrorToast('休憩終了に失敗しました');
+    }
+  };
+
+  // 退勤打刻
+  const clockOut = async () => {
+    try {
+      const rec = await ensureRecord();
+      if (!rec.clockInAt || rec.clockOutAt) return;
+      
+      // 休憩中は退勤できない
+      const lastBreak = rec.breaks[rec.breaks.length - 1];
+      if (lastBreak && !lastBreak.endAt) {
+        showErrorToast('休憩を終了してから退勤してください');
+        return;
+      }
+      
+      const ref = doc(db, 'timecards', rec.id);
+      const patch = { clockOutAt: Timestamp.now(), updatedAt: Timestamp.now() };
+      await updateDoc(ref, patch);
+      setRecord({ ...rec, ...patch });
+    } catch (e) {
+      console.error('[Timecard] clockOut error', e);
+      showErrorToast('退勤打刻に失敗しました');
+    }
+  };
+
+  // ボタン有効/無効の判定
+  const canClockIn = useMemo(() => !record?.clockInAt, [record]);
+  
+  const canBreakStart = useMemo(() => {
+    if (!record?.clockInAt || record?.clockOutAt) return false;
+    if (record.breaks.length >= MAX_BREAKS) return false;
+    const lastBreak = record.breaks[record.breaks.length - 1];
+    return !lastBreak || !!lastBreak.endAt; // 休憩中でない
+  }, [record]);
+  
+  const canBreakEnd = useMemo(() => {
+    if (!record?.clockInAt || record?.clockOutAt) return false;
+    if (record.breaks.length === 0) return false;
+    const lastBreak = record.breaks[record.breaks.length - 1];
+    return lastBreak && !lastBreak.endAt; // 休憩中
+  }, [record]);
+  
+  const canClockOut = useMemo(() => {
+    if (!record?.clockInAt || record?.clockOutAt) return false;
+    const lastBreak = record.breaks[record.breaks.length - 1];
+    return !lastBreak || !!lastBreak.endAt; // 休憩中でない
+  }, [record]);
+
+  // 勤務時間の計算
   const workedMinutes = useMemo(() => {
     if (!record?.clockInAt || !now) return 0;
     const end = record.clockOutAt ? record.clockOutAt.toDate() : now;
     return Math.floor((end.getTime() - record.clockInAt.toDate().getTime()) / 60000);
   }, [record, now]);
 
+  // 休憩時間の合計計算
   const breakMinutes = useMemo(() => {
-    if (!record?.breakStartAt) return 0;
-    const end = record.breakEndAt ? record.breakEndAt.toDate() : (record.clockOutAt ? null : now);
-    if (!end) return 0;
-    return Math.floor((end.getTime() - record.breakStartAt.toDate().getTime()) / 60000);
+    if (!record || record.breaks.length === 0 || !now) return 0;
+    let total = 0;
+    for (const b of record.breaks) {
+      const start = b.startAt.toDate();
+      let end: Date;
+      if (b.endAt) {
+        end = b.endAt.toDate();
+      } else if (record.clockOutAt) {
+        // 休憩終了していないが退勤済み（通常はないが念のため）
+        continue;
+      } else {
+        // 現在休憩中
+        end = now;
+      }
+      total += Math.floor((end.getTime() - start.getTime()) / 60000);
+    }
+    return total;
   }, [record, now]);
 
   const netMinutes = workedMinutes - breakMinutes;
   const hours = Math.floor(netMinutes / 60);
   const minutes = netMinutes % 60;
 
-  const clockIn = () => updateField('clockInAt');
-  const breakStart = () => updateField('breakStartAt');
-  const breakEnd = () => updateField('breakEndAt');
-  const clockOut = () => updateField('clockOutAt');
-
-  const canClockIn = useMemo(() => !record?.clockInAt, [record]);
-  const canBreakStart = useMemo(() => record?.clockInAt && !record?.breakStartAt && !record?.clockOutAt, [record]);
-  const canBreakEnd = useMemo(() => record?.breakStartAt && !record?.breakEndAt && !record?.clockOutAt, [record]);
-  const canClockOut = useMemo(() => record?.clockInAt && !record?.clockOutAt && (!record?.breakStartAt || record?.breakEndAt), [record]);
+  // 現在休憩中かどうか
+  const isOnBreak = useMemo(() => {
+    if (!record || record.breaks.length === 0) return false;
+    const lastBreak = record.breaks[record.breaks.length - 1];
+    return lastBreak && !lastBreak.endAt;
+  }, [record]);
 
   if (loading) {
     return (
@@ -316,7 +391,7 @@ export default function TimecardPage() {
                 : 'bg-gray-300 cursor-not-allowed'
             }`}
           >
-            休憩開始
+            休憩開始 {record && record.breaks.length > 0 && `(${record.breaks.length}/${MAX_BREAKS})`}
           </button>
           <button
             onClick={breakEnd}
@@ -351,22 +426,36 @@ export default function TimecardPage() {
                   : '未打刻'}
               </span>
             </div>
-            <div className="flex justify-between border-b pb-2">
-              <span className="text-gray-600">休憩開始</span>
-              <span className="font-mono font-bold">
-                {record?.breakStartAt
-                  ? record.breakStartAt.toDate().toLocaleTimeString('ja-JP')
-                  : '未打刻'}
-              </span>
+            
+            {/* 休憩時間リスト */}
+            <div className="border-b pb-2">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-gray-600">休憩記録</span>
+                <span className="text-sm text-gray-500">
+                  {record?.breaks.length || 0}/{MAX_BREAKS}回
+                </span>
+              </div>
+              {record && record.breaks.length > 0 ? (
+                <div className="ml-4 space-y-1">
+                  {record.breaks.map((b, idx) => (
+                    <div key={idx} className="flex justify-between text-sm">
+                      <span className="text-gray-500">#{idx + 1}</span>
+                      <span className="font-mono">
+                        {b.startAt.toDate().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
+                        {' → '}
+                        {b.endAt 
+                          ? b.endAt.toDate().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+                          : <span className="text-yellow-600">休憩中...</span>
+                        }
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="ml-4 text-sm text-gray-400">休憩なし</div>
+              )}
             </div>
-            <div className="flex justify-between border-b pb-2">
-              <span className="text-gray-600">休憩終了</span>
-              <span className="font-mono font-bold">
-                {record?.breakEndAt
-                  ? record.breakEndAt.toDate().toLocaleTimeString('ja-JP')
-                  : '未打刻'}
-              </span>
-            </div>
+
             <div className="flex justify-between border-b pb-2">
               <span className="text-gray-600">勤務時間</span>
               <span className="font-mono font-bold text-blue-600">
@@ -374,9 +463,10 @@ export default function TimecardPage() {
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">休憩時間</span>
-              <span className="font-mono font-bold text-yellow-600">
+              <span className="text-gray-600">休憩時間（合計）</span>
+              <span className={`font-mono font-bold ${isOnBreak ? 'text-yellow-600' : 'text-yellow-600'}`}>
                 {Math.floor(breakMinutes / 60)}時間 {breakMinutes % 60}分
+                {isOnBreak && ' (休憩中)'}
               </span>
             </div>
           </div>

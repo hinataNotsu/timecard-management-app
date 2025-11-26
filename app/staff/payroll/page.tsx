@@ -8,13 +8,18 @@ import { db } from '@/lib/firebase';
 import JapaneseHolidays from 'japanese-holidays';
 import { useToast } from '@/components/Toast';
 
+// 休憩期間の型
+interface BreakPeriod {
+  startAt: Timestamp;
+  endAt?: Timestamp;
+}
+
 interface TimecardRow {
   id: string;
   dateKey: string;
   date: Date;
   clockInAt?: Timestamp;
-  breakStartAt?: Timestamp;
-  breakEndAt?: Timestamp;
+  breaks: BreakPeriod[]; // 複数休憩対応
   clockOutAt?: Timestamp;
   hourlyWage?: number;
   status: 'draft' | 'pending' | 'approved' | 'rejected';
@@ -47,9 +52,6 @@ export default function PartTimePayrollPage() {
   } | null>(null);
   const [transportPerShift, setTransportPerShift] = useState<number>(0);
 
-  // モーダル状態（トーストconfirmに置換のため不要）
-  // const [submitModal, setSubmitModal] = useState<{ isOpen: boolean; incompleteList?: string[] }>({ isOpen: false });
-
   // Toast
   const { showSuccessToast, showErrorToast, showConfirmToast, showInfoToast } = useToast();
 
@@ -74,33 +76,34 @@ export default function PartTimePayrollPage() {
               overtimeDailyThresholdMinutes: Number(o.overtimeDailyThresholdMinutes ?? 480),
               holidayPremiumEnabled: !!o.holidayPremiumEnabled,
               holidayPremiumRate: Number(o.holidayPremiumRate ?? 0.35),
-              holidayIncludesWeekend: o.holidayIncludesWeekend ?? true,
+              holidayIncludesWeekend: !!o.holidayIncludesWeekend,
               transportAllowanceEnabled: !!o.transportAllowanceEnabled,
               transportAllowancePerShift: Number(o.transportAllowancePerShift ?? 0),
             });
           }
         } catch (e) {
-          console.warn('[PartTimePayroll] org settings load failed', e);
+          console.error('[PartTimePayroll] Error loading org settings:', e);
         }
 
-        // 個別交通費設定
+        // メンバー個別の交通費取得
         try {
-          const memberSnap = await getDoc(doc(db, 'organizations', userProfile.currentOrganizationId, 'members', userProfile.uid));
-          if (memberSnap.exists()) {
-            const mv = memberSnap.data() as any;
-            if (typeof mv.transportAllowancePerShift === 'number') {
-              setTransportPerShift(mv.transportAllowancePerShift);
+          const memRef = doc(db, 'organizations', userProfile.currentOrganizationId, 'members', userProfile.uid);
+          const memSnap = await getDoc(memRef);
+          if (memSnap.exists()) {
+            const mdata = memSnap.data() as any;
+            if (mdata.transportAllowance !== undefined) {
+              setTransportPerShift(Number(mdata.transportAllowance));
             }
           }
         } catch (e) {
-          console.warn('[PartTimePayroll] member setting load failed', e);
+          console.error('[PartTimePayroll] Error loading member transport:', e);
         }
 
-        // 月内タイムカード取得 (自分のみ、承認済みのみ)
+        // タイムカード取得
         const y = selectedMonth.getFullYear();
         const m = selectedMonth.getMonth();
-        const startKey = `${y}-${String(m+1).padStart(2,'0')}-01`;
-        const endKey = `${m === 11 ? y+1 : y}-${String(m === 11 ? 1 : m+2).padStart(2,'0')}-01`;
+        const startKey = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+        const endKey = `${m === 11 ? y + 1 : y}-${String(m === 11 ? 1 : m + 2).padStart(2, '0')}-01`;
         const qy = query(
           collection(db, 'timecards'),
           where('organizationId', '==', userProfile.currentOrganizationId),
@@ -112,27 +115,23 @@ export default function PartTimePayrollPage() {
         const rows: TimecardRow[] = [];
         for (const d of snap.docs) {
           const data = d.data() as any;
-          // 全てのステータスを表示（draft, pending, approved, rejected）
-          // 古いデータでstatusがない場合は'approved'とみなす
           const [dy, dm, dd] = data.dateKey.split('-').map(Number);
           rows.push({
             id: d.id,
             dateKey: data.dateKey,
-            date: new Date(dy, dm-1, dd),
+            date: new Date(dy, dm - 1, dd),
             clockInAt: data.clockInAt,
-            breakStartAt: data.breakStartAt,
-            breakEndAt: data.breakEndAt,
+            breaks: data.breaks || [], // 配列として取得
             clockOutAt: data.clockOutAt,
             hourlyWage: data.hourlyWage,
             status: data.status || 'approved',
           });
         }
-        rows.sort((a,b) => a.date.getTime() - b.date.getTime());
+        rows.sort((a, b) => a.date.getTime() - b.date.getTime());
         setTimecards(rows);
         setError(null);
       } catch (e: any) {
         console.error('[PartTimePayroll] load error', e);
-        // Firestoreインデックスエラーを検出
         if (e?.code === 'failed-precondition' || e?.message?.includes('index')) {
           setError('データベースのインデックスを構築中です。数分後に再度お試しください。');
         } else {
@@ -150,6 +149,19 @@ export default function PartTimePayrollPage() {
     if (!start || !end) return 0;
     return Math.max(0, Math.round((end.toMillis() - start.toMillis()) / 60000));
   };
+
+  // 複数休憩の合計時間を計算
+  const calcTotalBreakMinutes = (breaks: BreakPeriod[]): number => {
+    if (!breaks || breaks.length === 0) return 0;
+    let total = 0;
+    for (const b of breaks) {
+      if (b.startAt && b.endAt) {
+        total += Math.max(0, Math.round((b.endAt.toMillis() - b.startAt.toMillis()) / 60000));
+      }
+    }
+    return total;
+  };
+
   const calcNightMinutes = (clockIn?: Timestamp, clockOut?: Timestamp, nightStart?: string, nightEnd?: string) => {
     if (!clockIn || !clockOut || !nightStart || !nightEnd) return 0;
     const start = clockIn.toDate();
@@ -179,7 +191,7 @@ export default function PartTimePayrollPage() {
   const calcBreakdown = (row: TimecardRow) => {
     const hourly = row.hourlyWage ?? orgSettings?.defaultHourlyWage ?? 1100;
     const grossMin = minutesBetweenTimestamps(row.clockInAt, row.clockOutAt);
-    const breakMin = minutesBetweenTimestamps(row.breakStartAt, row.breakEndAt);
+    const breakMin = calcTotalBreakMinutes(row.breaks); // 配列から計算
     const totalMin = Math.max(0, grossMin - breakMin);
     const totalH = totalMin / 60;
     const base = hourly * totalH;
@@ -197,7 +209,6 @@ export default function PartTimePayrollPage() {
   };
 
   const summary = useMemo(() => {
-    // 全てのステータス(下書き、申請中、承認済み、却下)を集計
     const uniqueDays = new Set<string>();
     let totalMin = 0, nightMin = 0, overtimeMin = 0;
     let base = 0, night = 0, overtime = 0, holiday = 0, transport = 0, total = 0;
@@ -207,18 +218,17 @@ export default function PartTimePayrollPage() {
       totalMin += bd.totalMin; nightMin += bd.nightMin; overtimeMin += bd.overtimeMin;
       base += bd.base; night += bd.night; overtime += bd.overtime; holiday += bd.holiday; transport += bd.transport; total += bd.total;
     }
-    // 全てのタイムカードが承認済みかチェック
     const allApproved = timecards.length > 0 && timecards.every(t => t.status === 'approved');
     return { days: uniqueDays.size, totalMin, nightMin, overtimeMin, base, night, overtime, holiday, transport, total, allApproved };
   }, [timecards, orgSettings, transportPerShift]);
 
   const exportCsv = () => {
-    const header = ['日付','出勤','退勤','休憩(分)','時間(分)','夜間(分)','残業(分)','時給','基本(円)','深夜(円)','残業(円)','休日(円)','交通費(円)','合計(円)'];
+    const header = ['日付', '出勤', '退勤', '休憩(分)', '時間(分)', '夜間(分)', '残業(分)', '時給', '基本(円)', '深夜(円)', '残業(円)', '休日(円)', '交通費(円)', '合計(円)'];
     const lines = [header.join(',')];
     timecards.forEach(s => {
       const bd = calcBreakdown(s);
       const hourly = s.hourlyWage ?? orgSettings?.defaultHourlyWage ?? 1100;
-      const fmt = (ts?: Timestamp) => ts ? ts.toDate().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'}) : '--:--';
+      const fmt = (ts?: Timestamp) => ts ? ts.toDate().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '--:--';
       lines.push([
         s.dateKey,
         fmt(s.clockInAt),
@@ -243,21 +253,28 @@ export default function PartTimePayrollPage() {
     a.href = url;
     const y = selectedMonth.getFullYear();
     const m = selectedMonth.getMonth() + 1;
-    a.download = `my_payroll_${y}-${String(m).padStart(2,'0')}.csv`;
+    a.download = `my_payroll_${y}-${String(m).padStart(2, '0')}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const prevMonth = () => setSelectedMonth(new Date(selectedMonth.getFullYear(), selectedMonth.getMonth()-1, 1));
-  const nextMonth = () => setSelectedMonth(new Date(selectedMonth.getFullYear(), selectedMonth.getMonth()+1, 1));
+  const prevMonth = () => setSelectedMonth(new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() - 1, 1));
+  const nextMonth = () => setSelectedMonth(new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1));
+
+  // 休憩が完了しているかチェック（最後の休憩にendAtがあるか）
+  const isBreakComplete = (breaks: BreakPeriod[]): boolean => {
+    if (breaks.length === 0) return true;
+    const lastBreak = breaks[breaks.length - 1];
+    return !!lastBreak.endAt;
+  };
 
   // 打刻が完了したドラフトカードのみを対象にする
   const completedDraftCards = useMemo(() => {
-    return timecards.filter(t => 
-      t.status === 'draft' && 
-      t.clockInAt && 
+    return timecards.filter(t =>
+      t.status === 'draft' &&
+      t.clockInAt &&
       t.clockOutAt &&
-      (!t.breakStartAt || t.breakEndAt) // 休憩を開始したなら終了も必要
+      isBreakComplete(t.breaks) // 休憩が完了しているか
     );
   }, [timecards]);
 
@@ -285,296 +302,203 @@ export default function PartTimePayrollPage() {
         const issues: string[] = [];
         if (!card.clockInAt) issues.push('出勤なし');
         if (!card.clockOutAt) issues.push('退勤なし');
-        if (card.breakStartAt && !card.breakEndAt) issues.push('休憩終了なし');
-        return `${card.dateKey}: ${issues.join('、')}`;
+        if (!isBreakComplete(card.breaks)) issues.push('休憩終了なし');
+        return `${card.dateKey}: ${issues.join(', ')}`;
       });
-      confirmMessage = `以下のタイムカードは未完了のため申請されません:\n\n${incompleteList.join('\n')}\n\n完了済みのタイムカードのみ申請します。`;
+      confirmMessage = `以下のタイムカードは未完了のため申請されません:\n${incompleteList.join('\n')}\n\n完了済みの${completedDraftCards.length}件を申請しますか？`;
     } else {
-      confirmMessage = '完了済みのタイムカードを一括申請します。よろしいですか？';
+      confirmMessage = `${completedDraftCards.length}件のタイムカードを申請しますか？`;
     }
 
     const confirmed = await showConfirmToast(confirmMessage, {
-      title: 'タイムカードを一括申請しますか？',
-      confirmText: '申請',
+      title: 'タイムカード申請',
+      confirmText: '申請する',
       cancelText: 'キャンセル',
     });
-    if (confirmed) {
-      handleConfirmSubmit();
-    }
-  };
 
-  const handleConfirmSubmit = async () => {
-    const completedDraftCards = timecards.filter(t => {
-      if (t.status !== 'draft') return false;
-      if (!t.clockInAt || !t.clockOutAt) return false;
-      if (t.breakStartAt && !t.breakEndAt) return false;
-      return true;
-    });
+    if (!confirmed) return;
 
     try {
-      // 完了済みのドラフトカードのみを申請
+      const now = Timestamp.now();
       for (const card of completedDraftCards) {
         await updateDoc(doc(db, 'timecards', card.id), {
           status: 'pending',
-          updatedAt: Timestamp.now()
+          updatedAt: now,
         });
       }
-
-      // 成功トースト
-      showSuccessToast(`${completedDraftCards.length}件の申請が完了しました`);
-
-      // ステート更新で再取得
-      setTimecards(prev => prev.map(tc =>
-        completedDraftCards.some(c => c.id === tc.id)
-          ? { ...tc, status: 'pending', updatedAt: Timestamp.now() }
-          : tc
+      setTimecards(prev => prev.map(t =>
+        completedDraftCards.some(c => c.id === t.id)
+          ? { ...t, status: 'pending' }
+          : t
       ));
+      showSuccessToast(`${completedDraftCards.length}件のタイムカードを申請しました`);
     } catch (e) {
-      console.error('[Payroll] bulk submit error', e);
+      console.error('[PartTimePayroll] submit error', e);
       showErrorToast('申請に失敗しました');
     }
   };
 
+  // ステータスバッジ
+  const StatusBadge = ({ status }: { status: string }) => {
+    const styles: Record<string, string> = {
+      draft: 'bg-gray-100 text-gray-600',
+      pending: 'bg-yellow-100 text-yellow-700',
+      approved: 'bg-green-100 text-green-700',
+      rejected: 'bg-red-100 text-red-700',
+    };
+    const labels: Record<string, string> = {
+      draft: '下書き',
+      pending: '申請中',
+      approved: '承認済',
+      rejected: '却下',
+    };
+    return (
+      <span className={`px-2 py-0.5 rounded text-xs font-medium ${styles[status] || 'bg-gray-100'}`}>
+        {labels[status] || status}
+      </span>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">読み込み中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center text-red-600">{error}</div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-5xl mx-auto px-4 py-6">
+        {/* ヘッダー */}
         <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl font-bold">今月の給与一覧</h1>
-          <button onClick={() => router.push('/staff/dashboard')} className="text-sm text-gray-600 hover:text-gray-900">← ダッシュボード</button>
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold">給与明細</h1>
+            <div className="flex items-center gap-2">
+              <button onClick={prevMonth} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">←</button>
+              <span className="font-semibold">
+                {selectedMonth.getFullYear()}年{selectedMonth.getMonth() + 1}月
+              </span>
+              <button onClick={nextMonth} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">→</button>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportCsv}
+              className="px-3 py-1.5 bg-green-600 text-white rounded text-sm hover:bg-green-700"
+            >
+              CSV出力
+            </button>
+            <button
+              onClick={() => router.push('/staff/dashboard')}
+              className="text-sm text-gray-600 hover:text-gray-900"
+            >
+              ← ダッシュボード
+            </button>
+          </div>
         </div>
 
-        {/* エラー表示 */}
-        {error && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-            <div className="flex items-start gap-3">
-              <svg className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-              </svg>
-              <div className="flex-1">
-                <p className="font-semibold text-yellow-800">{error}</p>
-                <button
-                  onClick={() => {
-                    setLoading(true);
-                    setError(null);
-                    // 再取得
-                    const d = new Date(selectedMonth);
-                    setSelectedMonth(new Date(d.getFullYear(), d.getMonth(), 1));
-                  }}
-                  className="mt-2 px-3 py-1 text-sm rounded bg-yellow-600 text-white hover:bg-yellow-700"
-                >
-                  再読み込み
-                </button>
-              </div>
+        {/* サマリー */}
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            <div className="text-center">
+              <div className="text-gray-500 text-sm">出勤日数</div>
+              <div className="text-2xl font-bold">{summary.days}日</div>
             </div>
+            <div className="text-center">
+              <div className="text-gray-500 text-sm">総勤務時間</div>
+              <div className="text-2xl font-bold">{Math.floor(summary.totalMin / 60)}時間{summary.totalMin % 60}分</div>
+            </div>
+            <div className="text-center">
+              <div className="text-gray-500 text-sm">深夜時間</div>
+              <div className="text-2xl font-bold">{Math.floor(summary.nightMin / 60)}時間{summary.nightMin % 60}分</div>
+            </div>
+            <div className="text-center">
+              <div className="text-gray-500 text-sm">残業時間</div>
+              <div className="text-2xl font-bold">{Math.floor(summary.overtimeMin / 60)}時間{summary.overtimeMin % 60}分</div>
+            </div>
+          </div>
+          <div className="border-t pt-4">
+            <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-sm">
+              <div><span className="text-gray-500">基本給:</span> ¥{Math.round(summary.base).toLocaleString()}</div>
+              <div><span className="text-gray-500">深夜:</span> ¥{Math.round(summary.night).toLocaleString()}</div>
+              <div><span className="text-gray-500">残業:</span> ¥{Math.round(summary.overtime).toLocaleString()}</div>
+              <div><span className="text-gray-500">休日:</span> ¥{Math.round(summary.holiday).toLocaleString()}</div>
+              <div><span className="text-gray-500">交通費:</span> ¥{Math.round(summary.transport).toLocaleString()}</div>
+              <div className="font-bold text-blue-600">合計: ¥{summary.total.toLocaleString()}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* 一括申請ボタン */}
+        {completedDraftCards.length > 0 && (
+          <div className="mb-4 flex justify-end">
+            <button
+              onClick={handleBulkSubmit}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              下書き{completedDraftCards.length}件を一括申請
+            </button>
           </div>
         )}
 
-        <div className="bg-white rounded-lg shadow p-4 mb-6 flex flex-wrap gap-3 items-center">
-          <div className="flex items-center gap-2">
-            <button onClick={prevMonth} className="px-2 py-1 border rounded">←</button>
-            <div className="font-semibold">{selectedMonth.getFullYear()}年 {selectedMonth.getMonth()+1}月</div>
-            <button onClick={nextMonth} className="px-2 py-1 border rounded">→</button>
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            <button disabled={!canSubmit} onClick={handleBulkSubmit} className={`px-3 py-1 rounded text-white ${canSubmit ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-300 cursor-not-allowed'}`}>一括申請</button>
-            <button onClick={exportCsv} className="px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">CSV出力</button>
-          </div>
-        </div>
-
-        {/* サマリーカード */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 sm:gap-4 mb-6">
-          <div className="bg-white rounded-lg shadow p-3 sm:p-4">
-            <p className="text-xs sm:text-sm text-gray-600 mb-1">出勤日数</p>
-            <p className="text-xl sm:text-2xl font-bold text-gray-900">{summary.days}日</p>
-          </div>
-          <div className="bg-white rounded-lg shadow p-3 sm:p-4">
-            <p className="text-xs sm:text-sm text-gray-600 mb-1">総労働時間</p>
-            <p className="text-xl sm:text-2xl font-bold text-gray-900">{(summary.totalMin/60).toFixed(1)}h</p>
-          </div>
-          <div className="bg-white rounded-lg shadow p-3 sm:p-4">
-            <p className="text-xs sm:text-sm text-gray-600 mb-1">深夜時間</p>
-            <p className="text-xl sm:text-2xl font-bold text-gray-900">{(summary.nightMin/60).toFixed(1)}h</p>
-          </div>
-          <div className="bg-white rounded-lg shadow p-3 sm:p-4">
-            <p className="text-xs sm:text-sm text-gray-600 mb-1">交通費合計</p>
-            <p className="text-xl sm:text-2xl font-bold text-gray-900">¥{Math.round(summary.transport).toLocaleString('ja-JP')}</p>
-          </div>
-          <div className="bg-white rounded-lg shadow p-3 sm:p-4 col-span-2 sm:col-span-1">
-            <p className="text-xs sm:text-sm text-gray-600 mb-1">総支給額</p>
-            <div className="flex items-center gap-2">
-              <p className="text-xl sm:text-2xl font-bold text-gray-900">¥{Math.round(summary.total).toLocaleString('ja-JP')}</p>
-              {summary.allApproved ? (
-                <svg className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-label="全て承認済み">
-                  <title>全て承認済み</title>
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
-              ) : timecards.length > 0 ? (
-                <svg className="w-5 h-5 sm:w-6 sm:h-6 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="3,3" viewBox="0 0 20 20" aria-label="未確定">
-                  <title>未確定</title>
-                  <circle cx="10" cy="10" r="7" />
-                </svg>
-              ) : null}
-            </div>
-          </div>
-        </div>
-
-        {/* デスクトップ: テーブル表示 */}
-        <div className="hidden lg:block bg-white rounded-lg shadow overflow-hidden">
+        {/* タイムカード一覧 */}
+        <div className="bg-white rounded-lg shadow overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
-                <th className="p-2 border-b text-center">日付</th>
-                <th className="p-2 border-b text-center">ステータス</th>
-                <th className="p-2 border-b text-center">出勤</th>
-                <th className="p-2 border-b text-center">退勤</th>
-                <th className="p-2 border-b text-center">休憩(分)</th>
-                <th className="p-2 border-b text-center">時間(分)</th>
-                <th className="p-2 border-b text-center">夜間(分)</th>
-                <th className="p-2 border-b text-center">残業(分)</th>
-                <th className="p-2 border-b text-center">基本(円)</th>
-                <th className="p-2 border-b text-center">深夜(円)</th>
-                <th className="p-2 border-b text-center">残業(円)</th>
-                <th className="p-2 border-b text-center">休日(円)</th>
-                <th className="p-2 border-b text-center">交通費(円)</th>
-                <th className="p-2 border-b text-center">合計(円)</th>
+                <th className="p-3 border-b text-left">日付</th>
+                <th className="p-3 border-b text-center">出勤</th>
+                <th className="p-3 border-b text-center">退勤</th>
+                <th className="p-3 border-b text-center">休憩(分)</th>
+                <th className="p-3 border-b text-center">勤務(分)</th>
+                <th className="p-3 border-b text-center">時給</th>
+                <th className="p-3 border-b text-center">合計</th>
+                <th className="p-3 border-b text-center">状態</th>
               </tr>
             </thead>
             <tbody>
-              {loading ? (
-                <tr><td className="p-4 text-center" colSpan={14}>読み込み中...</td></tr>
-              ) : timecards.length === 0 ? (
-                <tr><td className="p-4 text-center" colSpan={14}>タイムカードがありません</td></tr>
+              {timecards.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="p-8 text-center text-gray-500">
+                    タイムカードがありません
+                  </td>
+                </tr>
               ) : (
-                timecards.map(s => {
-                  const bd = calcBreakdown(s);
-                  const fmt = (ts?: Timestamp) => ts ? ts.toDate().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'}) : '--:--';
-                  const statusLabel = s.status === 'approved' ? '承認済み' : s.status === 'rejected' ? '却下' : s.status === 'pending' ? '申請中' : '下書き';
-                  const statusColor = s.status === 'approved' ? 'bg-green-100 text-green-800' : s.status === 'rejected' ? 'bg-red-100 text-red-800' : s.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800';
+                timecards.map((tc) => {
+                  const bd = calcBreakdown(tc);
+                  const fmt = (ts?: Timestamp) => ts ? ts.toDate().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '--:--';
                   return (
-                    <tr key={s.id} className="hover:bg-gray-50">
-                      <td className="p-2 border-b text-center">{s.dateKey}</td>
-                      <td className="p-2 border-b text-center"><span className={`inline-block px-2 py-0.5 rounded text-xs ${statusColor}`}>{statusLabel}</span></td>
-                      <td className="p-2 border-b text-center">{fmt(s.clockInAt)}</td>
-                      <td className="p-2 border-b text-center">{fmt(s.clockOutAt)}</td>
-                      <td className="p-2 border-b text-center">{bd.breakMin || 0}</td>
-                      <td className="p-2 border-b text-center">{bd.totalMin}</td>
-                      <td className="p-2 border-b text-center">{bd.nightMin}</td>
-                      <td className="p-2 border-b text-center">{bd.overtimeMin}</td>
-                      <td className="p-2 border-b text-center">¥{Math.round(bd.base).toLocaleString('ja-JP')}</td>
-                      <td className="p-2 border-b text-center">¥{Math.round(bd.night).toLocaleString('ja-JP')}</td>
-                      <td className="p-2 border-b text-center">¥{Math.round(bd.overtime).toLocaleString('ja-JP')}</td>
-                      <td className="p-2 border-b text-center">¥{Math.round(bd.holiday).toLocaleString('ja-JP')}</td>
-                      <td className="p-2 border-b text-center">¥{Math.round(bd.transport).toLocaleString('ja-JP')}</td>
-                      <td className="p-2 border-b text-center">¥{Math.round(bd.total).toLocaleString('ja-JP')}</td>
+                    <tr key={tc.id} className="hover:bg-gray-50">
+                      <td className="p-3 border-b">{tc.dateKey}</td>
+                      <td className="p-3 border-b text-center">{fmt(tc.clockInAt)}</td>
+                      <td className="p-3 border-b text-center">{fmt(tc.clockOutAt)}</td>
+                      <td className="p-3 border-b text-center">{bd.breakMin}</td>
+                      <td className="p-3 border-b text-center">{bd.totalMin}</td>
+                      <td className="p-3 border-b text-center">¥{tc.hourlyWage ?? orgSettings?.defaultHourlyWage ?? 1100}</td>
+                      <td className="p-3 border-b text-center font-semibold">¥{bd.total.toLocaleString()}</td>
+                      <td className="p-3 border-b text-center">
+                        <StatusBadge status={tc.status} />
+                      </td>
                     </tr>
                   );
                 })
               )}
             </tbody>
-            {!loading && timecards.length > 0 && (
-              <tfoot>
-                <tr className="bg-gray-100 font-semibold">
-                  <td className="p-2 border-t text-center">合計</td>
-                  <td className="p-2 border-t text-center" colSpan={4}></td>
-                  <td className="p-2 border-t text-center">{summary.totalMin}</td>
-                  <td className="p-2 border-t text-center">{summary.nightMin}</td>
-                  <td className="p-2 border-t text-center">{summary.overtimeMin}</td>
-                  <td className="p-2 border-t text-center">¥{Math.round(summary.base).toLocaleString('ja-JP')}</td>
-                  <td className="p-2 border-t text-center">¥{Math.round(summary.night).toLocaleString('ja-JP')}</td>
-                  <td className="p-2 border-t text-center">¥{Math.round(summary.overtime).toLocaleString('ja-JP')}</td>
-                  <td className="p-2 border-t text-center">¥{Math.round(summary.holiday).toLocaleString('ja-JP')}</td>
-                  <td className="p-2 border-t text-center">¥{Math.round(summary.transport).toLocaleString('ja-JP')}</td>
-                  <td className="p-2 border-t text-center">¥{Math.round(summary.total).toLocaleString('ja-JP')}</td>
-                </tr>
-              </tfoot>
-            )}
           </table>
         </div>
-
-        {/* モバイル: カード表示 */}
-        <div className="lg:hidden space-y-3">
-          {loading ? (
-            <div className="bg-white rounded-lg shadow p-4 text-center">読み込み中...</div>
-          ) : timecards.length === 0 ? (
-            <div className="bg-white rounded-lg shadow p-4 text-center">タイムカードがありません</div>
-          ) : (
-            timecards.map(s => {
-              const bd = calcBreakdown(s);
-              const fmt = (ts?: Timestamp) => ts ? ts.toDate().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'}) : '--:--';
-              const statusLabel = s.status === 'approved' ? '承認済み' : s.status === 'rejected' ? '却下' : s.status === 'pending' ? '申請中' : '下書き';
-              const statusColor = s.status === 'approved' ? 'bg-green-100 text-green-800' : s.status === 'rejected' ? 'bg-red-100 text-red-800' : s.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800';
-              return (
-                <div key={s.id} className="bg-white rounded-lg shadow p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="font-semibold text-base">{s.dateKey}</div>
-                    <span className={`px-2 py-1 rounded text-xs ${statusColor}`}>{statusLabel}</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-sm mb-3">
-                    <div>
-                      <span className="text-gray-600">出勤:</span> <span className="font-medium">{fmt(s.clockInAt)}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">退勤:</span> <span className="font-medium">{fmt(s.clockOutAt)}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">休憩:</span> <span className="font-medium">{bd.breakMin}分</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">勤務:</span> <span className="font-medium">{bd.totalMin}分</span>
-                    </div>
-                    {bd.nightMin > 0 && (
-                      <div>
-                        <span className="text-gray-600">深夜:</span> <span className="font-medium">{bd.nightMin}分</span>
-                      </div>
-                    )}
-                    {bd.overtimeMin > 0 && (
-                      <div>
-                        <span className="text-gray-600">残業:</span> <span className="font-medium">{bd.overtimeMin}分</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="border-t pt-3 space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">基本給</span>
-                      <span className="font-medium">¥{Math.round(bd.base).toLocaleString('ja-JP')}</span>
-                    </div>
-                    {bd.night > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">深夜手当</span>
-                        <span className="font-medium">¥{Math.round(bd.night).toLocaleString('ja-JP')}</span>
-                      </div>
-                    )}
-                    {bd.overtime > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">残業手当</span>
-                        <span className="font-medium">¥{Math.round(bd.overtime).toLocaleString('ja-JP')}</span>
-                      </div>
-                    )}
-                    {bd.holiday > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">休日手当</span>
-                        <span className="font-medium">¥{Math.round(bd.holiday).toLocaleString('ja-JP')}</span>
-                      </div>
-                    )}
-                    {bd.transport > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">交通費</span>
-                        <span className="font-medium">¥{Math.round(bd.transport).toLocaleString('ja-JP')}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between pt-2 border-t font-semibold text-base">
-                      <span>合計</span>
-                      <span className="text-emerald-600">¥{Math.round(bd.total).toLocaleString('ja-JP')}</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
       </div>
-
-      {/* 一括申請確認モーダルはトーストconfirmに統一のため削除 */}
     </div>
   );
 }

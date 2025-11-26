@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Organization } from '@/types';
+import { useToast } from '@/components/Toast';
 
 type OrgPaySettings = Pick<
   Organization,
@@ -40,23 +41,108 @@ const defaultSettings: Required<OrgPaySettings> = {
   transportAllowancePerShift: 0,
 };
 
+type TabType = 'salary' | 'shift' | 'timecard';
+
+// トグルスイッチコンポーネント
+const Toggle = ({ 
+  enabled, 
+  onChange, 
+  disabled = false 
+}: { 
+  enabled: boolean; 
+  onChange: (value: boolean) => void; 
+  disabled?: boolean;
+}) => (
+  <button
+    type="button"
+    onClick={() => !disabled && onChange(!enabled)}
+    disabled={disabled}
+    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+      enabled ? 'bg-blue-600' : 'bg-gray-200'
+    } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+  >
+    <span
+      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+        enabled ? 'translate-x-5' : 'translate-x-0'
+      }`}
+    />
+  </button>
+);
+
+// 設定カードコンポーネント
+const SettingCard = ({
+  icon,
+  title,
+  description,
+  enabled,
+  onToggle,
+  children,
+  preview,
+  disabled = false,
+}: {
+  icon: string;
+  title: string;
+  description: string;
+  enabled?: boolean;
+  onToggle?: (value: boolean) => void;
+  children?: React.ReactNode;
+  preview?: React.ReactNode;
+  disabled?: boolean;
+}) => (
+  <div className={`bg-white rounded-xl shadow-sm border transition-all duration-200 ${enabled === false ? 'opacity-60' : ''}`}>
+    <div className="p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <span className="text-2xl">{icon}</span>
+          <div>
+            <h3 className="font-semibold text-gray-900">{title}</h3>
+            <p className="text-sm text-gray-500 mt-0.5">{description}</p>
+          </div>
+        </div>
+        {onToggle && (
+          <Toggle enabled={enabled ?? false} onChange={onToggle} disabled={disabled} />
+        )}
+      </div>
+      
+      {preview && (enabled ?? true) && (
+        <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-100">
+          {preview}
+        </div>
+      )}
+      
+      {children && (enabled ?? true) && (
+        <div className="mt-4 pt-4 border-t border-gray-100">
+          {children}
+        </div>
+      )}
+    </div>
+  </div>
+);
+
 export default function OrganizationSettingsPage() {
   const router = useRouter();
   const { userProfile, loading } = useAuth();
+  const { showSuccessToast, showErrorToast } = useToast();
   const [saving, setSaving] = useState(false);
   const [orgName, setOrgName] = useState('');
   const [settings, setSettings] = useState<Required<OrgPaySettings>>(defaultSettings);
   const [shiftSubmissionCycle, setShiftSubmissionCycle] = useState<'weekly' | 'biweekly' | 'monthly'>('monthly');
-  const [weekStartDay, setWeekStartDay] = useState<number>(1); // 1=月曜
+  const [weekStartDay, setWeekStartDay] = useState<number>(1);
   const [weeklyDeadlineDaysBefore, setWeeklyDeadlineDaysBefore] = useState<number>(3);
   const [monthlyDeadlineDay, setMonthlyDeadlineDay] = useState<number>(25);
   const [isWatchAdmin, setIsWatchAdmin] = useState<boolean>(true);
   const [showWatchAdminDialog, setShowWatchAdminDialog] = useState<boolean>(false);
   const [pendingWatchAdminValue, setPendingWatchAdminValue] = useState<boolean>(true);
   const [loaded, setLoaded] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabType>('salary');
+  const [hasChanges, setHasChanges] = useState(false);
+  
   const isManager = !!userProfile?.isManage;
-
   const orgId = userProfile?.currentOrganizationId;
+  const canEdit = isManager;
+
+  // 初期値を保存して変更検知
+  const [initialSettings, setInitialSettings] = useState<string>('');
 
   useEffect(() => {
     if (loading) return;
@@ -74,7 +160,7 @@ export default function OrganizationSettingsPage() {
       if (snap.exists()) {
         const org = snap.data() as Organization;
         setOrgName(org.name || '');
-        setSettings({
+        const loadedSettings = {
           defaultHourlyWage: org.defaultHourlyWage ?? defaultSettings.defaultHourlyWage,
           nightPremiumEnabled: org.nightPremiumEnabled ?? defaultSettings.nightPremiumEnabled,
           nightPremiumRate: org.nightPremiumRate ?? defaultSettings.nightPremiumRate,
@@ -88,75 +174,105 @@ export default function OrganizationSettingsPage() {
           holidayIncludesWeekend: org.holidayIncludesWeekend ?? defaultSettings.holidayIncludesWeekend,
           transportAllowanceEnabled: org.transportAllowanceEnabled ?? defaultSettings.transportAllowanceEnabled,
           transportAllowancePerShift: org.transportAllowancePerShift ?? defaultSettings.transportAllowancePerShift,
-        });
+        };
+        setSettings(loadedSettings);
         setShiftSubmissionCycle(org.shiftSubmissionCycle ?? 'monthly');
         setWeekStartDay(org.weekStartDay ?? 1);
         setWeeklyDeadlineDaysBefore(org.weeklyDeadlineDaysBefore ?? 3);
         setMonthlyDeadlineDay(org.monthlyDeadlineDay ?? 25);
         setIsWatchAdmin(org.isWatchAdmin ?? true);
+        
+        // 初期状態を保存
+        setInitialSettings(JSON.stringify({
+          ...loadedSettings,
+          shiftSubmissionCycle: org.shiftSubmissionCycle ?? 'monthly',
+          weekStartDay: org.weekStartDay ?? 1,
+          weeklyDeadlineDaysBefore: org.weeklyDeadlineDaysBefore ?? 3,
+          monthlyDeadlineDay: org.monthlyDeadlineDay ?? 25,
+          isWatchAdmin: org.isWatchAdmin ?? true,
+        }));
       }
       setLoaded(true);
     };
     fetchOrg();
   }, [loading, userProfile, orgId, router]);
 
-  const handleNumber = (v: string) => (isNaN(Number(v)) ? '' : Number(v));
+  // 変更検知
+  useEffect(() => {
+    if (!initialSettings) return;
+    const currentState = JSON.stringify({
+      ...settings,
+      shiftSubmissionCycle,
+      weekStartDay,
+      weeklyDeadlineDaysBefore,
+      monthlyDeadlineDay,
+      isWatchAdmin,
+    });
+    setHasChanges(currentState !== initialSettings);
+  }, [settings, shiftSubmissionCycle, weekStartDay, weeklyDeadlineDaysBefore, monthlyDeadlineDay, isWatchAdmin, initialSettings]);
 
-  const canEdit = isManager;
+  // プレビュー計算
+  const previews = useMemo(() => {
+    const base = settings.defaultHourlyWage;
+    return {
+      nightWage: Math.round(base * (1 + settings.nightPremiumRate)),
+      nightBonus: Math.round(base * settings.nightPremiumRate),
+      overtimeWage: Math.round(base * (1 + settings.overtimePremiumRate)),
+      overtimeBonus: Math.round(base * settings.overtimePremiumRate),
+      holidayWage: Math.round(base * (1 + settings.holidayPremiumRate)),
+      holidayBonus: Math.round(base * settings.holidayPremiumRate),
+      overtimeThresholdHours: Math.floor(settings.overtimeDailyThresholdMinutes / 60),
+      overtimeThresholdMins: settings.overtimeDailyThresholdMinutes % 60,
+    };
+  }, [settings]);
 
   const save = async () => {
-    if (!orgId) return;
-    if (!canEdit) return;
+    if (!orgId || !canEdit) return;
+    
     // バリデーション
     if (settings.defaultHourlyWage <= 0) {
-      alert('時給は1以上を入力してください');
+      showErrorToast('時給は1以上を入力してください');
       return;
     }
     if (settings.nightPremiumEnabled) {
       if (settings.nightPremiumRate < 0 || settings.nightPremiumRate > 2) {
-        alert('深夜割増率は0〜2の範囲で指定してください（例: 0.25 = 25%）');
+        showErrorToast('深夜割増率は0〜2の範囲で指定してください');
         return;
       }
       const hhmm = /^\d{2}:\d{2}$/;
       if (!hhmm.test(settings.nightStart) || !hhmm.test(settings.nightEnd)) {
-        alert('深夜時間はHH:mm形式で入力してください');
+        showErrorToast('深夜時間はHH:mm形式で入力してください');
         return;
       }
     }
     if (settings.overtimePremiumEnabled) {
       if (settings.overtimePremiumRate < 0 || settings.overtimePremiumRate > 2) {
-        alert('残業割増率は0〜2の範囲で指定してください');
+        showErrorToast('残業割増率は0〜2の範囲で指定してください');
         return;
       }
       if (settings.overtimeDailyThresholdMinutes < 0 || settings.overtimeDailyThresholdMinutes > 1440) {
-        alert('残業閾値（分）は0〜1440の範囲で指定してください');
+        showErrorToast('残業閾値は0〜1440分の範囲で指定してください');
         return;
       }
     }
     if (settings.holidayPremiumEnabled) {
       if (settings.holidayPremiumRate < 0 || settings.holidayPremiumRate > 2) {
-        alert('休日割増率は0〜2の範囲で指定してください');
+        showErrorToast('休日割増率は0〜2の範囲で指定してください');
         return;
       }
     }
-    if (settings.transportAllowanceEnabled) {
-      if (settings.transportAllowancePerShift < 0) {
-        alert('交通費は0以上で指定してください');
-        return;
-      }
+    if (settings.transportAllowanceEnabled && settings.transportAllowancePerShift < 0) {
+      showErrorToast('交通費は0以上で指定してください');
+      return;
     }
-    // シフト提出ルールのバリデーション
-    if (shiftSubmissionCycle === 'weekly' || shiftSubmissionCycle === 'biweekly') {
-      if (weeklyDeadlineDaysBefore < 1 || weeklyDeadlineDaysBefore > 30) {
-        alert('締切日数は1〜30の範囲で指定してください');
-        return;
-      }
+    if ((shiftSubmissionCycle === 'weekly' || shiftSubmissionCycle === 'biweekly') && 
+        (weeklyDeadlineDaysBefore < 1 || weeklyDeadlineDaysBefore > 30)) {
+      showErrorToast('締切日数は1〜30の範囲で指定してください');
+      return;
     }
-    if (shiftSubmissionCycle === 'monthly') {
-      if (monthlyDeadlineDay < 1 || monthlyDeadlineDay > 31) {
-        alert('締切日は1〜31の範囲で指定してください');
-        return;
-      }
+    if (shiftSubmissionCycle === 'monthly' && (monthlyDeadlineDay < 1 || monthlyDeadlineDay > 31)) {
+      showErrorToast('締切日は1〜31の範囲で指定してください');
+      return;
     }
 
     setSaving(true);
@@ -164,7 +280,6 @@ export default function OrganizationSettingsPage() {
       await setDoc(
         doc(db, 'organizations', orgId),
         {
-          // name はここでは更新しない（別UIを想定）。
           defaultHourlyWage: settings.defaultHourlyWage,
           nightPremiumEnabled: settings.nightPremiumEnabled,
           nightPremiumRate: settings.nightPremiumRate,
@@ -178,20 +293,28 @@ export default function OrganizationSettingsPage() {
           holidayIncludesWeekend: settings.holidayIncludesWeekend,
           transportAllowanceEnabled: settings.transportAllowanceEnabled,
           transportAllowancePerShift: settings.transportAllowancePerShift,
-          shiftSubmissionCycle: shiftSubmissionCycle,
-          weekStartDay: weekStartDay,
-          weeklyDeadlineDaysBefore: weeklyDeadlineDaysBefore,
-          monthlyDeadlineDay: monthlyDeadlineDay,
-          isWatchAdmin: isWatchAdmin,
+          shiftSubmissionCycle,
+          weekStartDay,
+          weeklyDeadlineDaysBefore,
+          monthlyDeadlineDay,
+          isWatchAdmin,
           updatedAt: Timestamp.now(),
         },
         { merge: true }
       );
-      // 保存後はダッシュボードへ戻る
-      router.push('/company/dashboard');
+      showSuccessToast('設定を保存しました');
+      setInitialSettings(JSON.stringify({
+        ...settings,
+        shiftSubmissionCycle,
+        weekStartDay,
+        weeklyDeadlineDaysBefore,
+        monthlyDeadlineDay,
+        isWatchAdmin,
+      }));
+      setHasChanges(false);
     } catch (e) {
       console.error('[Org Settings] save error', e);
-      alert('保存に失敗しました');
+      showErrorToast('保存に失敗しました');
     } finally {
       setSaving(false);
     }
@@ -210,345 +333,494 @@ export default function OrganizationSettingsPage() {
 
   if (!userProfile || !orgId) return null;
 
+  const tabs: { id: TabType; label: string; icon: string }[] = [
+    { id: 'salary', label: '給与設定', icon: '💰' },
+    { id: 'shift', label: 'シフトルール', icon: '📅' },
+    { id: 'timecard', label: 'タイムカード', icon: '⏰' },
+  ];
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">企業設定</h1>
-            <p className="text-sm text-gray-600">{orgName}</p>
+    <div className="min-h-screen bg-gray-50 pb-24">
+      {/* ヘッダー */}
+      <header className="bg-white shadow-sm sticky top-0 z-10">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900">企業設定</h1>
+              <p className="text-sm text-gray-500 mt-0.5">{orgName}</p>
+            </div>
+            <button
+              onClick={() => router.push('/company/dashboard')}
+              className="px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium transition-colors"
+            >
+              ← 戻る
+            </button>
           </div>
-          <button
-            onClick={() => router.back()}
-            className="px-3 py-2 rounded bg-gray-100 hover:bg-gray-200 text-gray-700"
-          >戻る</button>
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-white rounded-lg shadow p-6 space-y-6">
-          <h2 className="text-lg font-semibold text-gray-900">給与設定</h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">デフォルト時給（円）</label>
-              <input
-                type="number"
-                min={1}
-                value={settings.defaultHourlyWage}
-                onChange={(e) =>
-                  setSettings((s) => ({ ...s, defaultHourlyWage: Number(e.target.value) }))
-                }
-                disabled={!canEdit}
-                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="例: 1100"
-              />
-            </div>
-
-            <div className="flex items-end gap-3">
-              <div className="flex items-center gap-2">
-                <input
-                  id="nightEnabled"
-                  type="checkbox"
-                  checked={settings.nightPremiumEnabled}
-                  onChange={(e) => setSettings((s) => ({ ...s, nightPremiumEnabled: e.target.checked }))}
-                  disabled={!canEdit}
-                  className="h-4 w-4"
-                />
-                <label htmlFor="nightEnabled" className="text-sm font-medium text-gray-700">深夜割増を適用</label>
-              </div>
-            </div>
+      {/* 設定サマリー */}
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-100">
+          <h2 className="text-sm font-medium text-blue-800 mb-2">現在の設定</h2>
+          <div className="flex flex-wrap gap-2">
+            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${settings.nightPremiumEnabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}>
+              {settings.nightPremiumEnabled ? '✓' : '×'} 深夜割増
+            </span>
+            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${settings.overtimePremiumEnabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}>
+              {settings.overtimePremiumEnabled ? '✓' : '×'} 残業割増
+            </span>
+            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${settings.holidayPremiumEnabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}>
+              {settings.holidayPremiumEnabled ? '✓' : '×'} 休日割増
+            </span>
+            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${settings.transportAllowanceEnabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}>
+              {settings.transportAllowanceEnabled ? `✓ 交通費 ¥${settings.transportAllowancePerShift.toLocaleString()}` : '× 交通費'}
+            </span>
           </div>
+        </div>
+      </div>
 
-          <div className={`grid grid-cols-1 md:grid-cols-3 gap-6 ${settings.nightPremiumEnabled ? '' : 'opacity-50'}`}>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">深夜割増率</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  max={2}
-                  value={settings.nightPremiumRate}
-                  onChange={(e) => setSettings((s) => ({ ...s, nightPremiumRate: Number(e.target.value) }))}
-                  disabled={!canEdit || !settings.nightPremiumEnabled}
-                  className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <span className="text-gray-600">(0.25 = 25%)</span>
-              </div>
-            </div>
+      {/* タブナビゲーション */}
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                activeTab === tab.id
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <span>{tab.icon}</span>
+              <span className="hidden sm:inline">{tab.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">深夜開始</label>
-              <input
-                type="time"
-                value={settings.nightStart}
-                onChange={(e) => setSettings((s) => ({ ...s, nightStart: e.target.value }))}
-                disabled={!canEdit || !settings.nightPremiumEnabled}
-                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">深夜終了</label>
-              <input
-                type="time"
-                value={settings.nightEnd}
-                onChange={(e) => setSettings((s) => ({ ...s, nightEnd: e.target.value }))}
-                disabled={!canEdit || !settings.nightPremiumEnabled}
-                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-          </div>
-
-          {/* 残業割増 */}
-          <hr className="my-2" />
-          <h3 className="text-md font-semibold text-gray-900">残業割増</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="flex items-end gap-3">
-              <div className="flex items-center gap-2">
-                <input
-                  id="otEnabled"
-                  type="checkbox"
-                  checked={settings.overtimePremiumEnabled}
-                  onChange={(e) => setSettings((s) => ({ ...s, overtimePremiumEnabled: e.target.checked }))}
-                  disabled={!canEdit}
-                  className="h-4 w-4"
-                />
-                <label htmlFor="otEnabled" className="text-sm font-medium text-gray-700">残業割増を適用</label>
-              </div>
-            </div>
-            <div className={`${settings.overtimePremiumEnabled ? '' : 'opacity-50'}`}>
-              <label className="block text-sm font-medium text-gray-700 mb-1">残業割増率</label>
-              <input
-                type="number"
-                step="0.01"
-                min={0}
-                max={2}
-                value={settings.overtimePremiumRate}
-                onChange={(e) => setSettings((s) => ({ ...s, overtimePremiumRate: Number(e.target.value) }))}
-                disabled={!canEdit || !settings.overtimePremiumEnabled}
-                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div className={`${settings.overtimePremiumEnabled ? '' : 'opacity-50'}`}>
-              <label className="block text-sm font-medium text-gray-700 mb-1">1日あたり閾値（分）</label>
-              <input
-                type="number"
-                min={0}
-                max={1440}
-                value={settings.overtimeDailyThresholdMinutes}
-                onChange={(e) => setSettings((s) => ({ ...s, overtimeDailyThresholdMinutes: Number(e.target.value) }))}
-                disabled={!canEdit || !settings.overtimePremiumEnabled}
-                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="例: 480 (8時間)"
-              />
-            </div>
-          </div>
-
-          {/* 休日割増 */}
-          <hr className="my-2" />
-          <h3 className="text-md font-semibold text-gray-900">休日割増</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="flex items-end gap-3">
-              <div className="flex items-center gap-2">
-                <input
-                  id="holidayEnabled"
-                  type="checkbox"
-                  checked={settings.holidayPremiumEnabled}
-                  onChange={(e) => setSettings((s) => ({ ...s, holidayPremiumEnabled: e.target.checked }))}
-                  disabled={!canEdit}
-                  className="h-4 w-4"
-                />
-                <label htmlFor="holidayEnabled" className="text-sm font-medium text-gray-700">休日割増を適用</label>
-              </div>
-            </div>
-            <div className={`${settings.holidayPremiumEnabled ? '' : 'opacity-50'}`}>
-              <label className="block text-sm font-medium text-gray-700 mb-1">休日割増率</label>
-              <input
-                type="number"
-                step="0.01"
-                min={0}
-                max={2}
-                value={settings.holidayPremiumRate}
-                onChange={(e) => setSettings((s) => ({ ...s, holidayPremiumRate: Number(e.target.value) }))}
-                disabled={!canEdit || !settings.holidayPremiumEnabled}
-                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div className={`${settings.holidayPremiumEnabled ? '' : 'opacity-50'}`}>
-              <label className="block text-sm font-medium text-gray-700 mb-1">休日対象</label>
-              <div className="flex items-center gap-2">
-                <input
-                  id="holidayWeekend"
-                  type="checkbox"
-                  checked={settings.holidayIncludesWeekend}
-                  onChange={(e) => setSettings((s) => ({ ...s, holidayIncludesWeekend: e.target.checked }))}
-                  disabled={!canEdit || !settings.holidayPremiumEnabled}
-                  className="h-4 w-4"
-                />
-                <label htmlFor="holidayWeekend" className="text-sm text-gray-700">土日も休日扱いにする</label>
-              </div>
-            </div>
-          </div>
-
-          {/* 交通費 */}
-          <hr className="my-2" />
-          <h3 className="text-md font-semibold text-gray-900">交通費</h3>
-          <div className="grid grid-cols-1 gap-6">
-            <div className="flex items-center gap-3">
-              <input
-                id="transEnabled"
-                type="checkbox"
-                checked={settings.transportAllowanceEnabled}
-                onChange={(e) => setSettings((s) => ({ ...s, transportAllowanceEnabled: e.target.checked }))}
-                disabled={!canEdit}
-                className="h-4 w-4"
-              />
-              <label htmlFor="transEnabled" className="text-sm font-medium text-gray-700">1シフトあたり交通費を支給</label>
-            </div>
-            {settings.transportAllowanceEnabled && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <p className="text-sm text-blue-800">
-                  💡 各ユーザーの交通費は<button onClick={() => router.push('/company/members')} className="underline font-semibold hover:text-blue-900">ユーザー一覧設定</button>で個別に設定できます。
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* シフト提出ルール */}
-          <hr className="my-2" />
-          <h3 className="text-md font-semibold text-gray-900">シフト提出ルール</h3>
+      {/* メインコンテンツ */}
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="space-y-4">
           
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">提出サイクル</label>
-              <select
-                value={shiftSubmissionCycle}
-                onChange={(e) => setShiftSubmissionCycle(e.target.value as 'weekly' | 'biweekly' | 'monthly')}
-                disabled={!canEdit}
-                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+          {/* 給与設定タブ */}
+          {activeTab === 'salary' && (
+            <>
+              {/* 基本時給 */}
+              <SettingCard
+                icon="💵"
+                title="基本時給"
+                description="全スタッフのデフォルト時給を設定します"
               >
-                <option value="weekly">1週間ごと</option>
-                <option value="biweekly">2週間ごと</option>
-                <option value="monthly">1ヶ月ごと</option>
-              </select>
-            </div>
-
-            {(shiftSubmissionCycle === 'weekly' || shiftSubmissionCycle === 'biweekly') && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-blue-50 p-4 rounded-lg">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">週の開始日</label>
-                  <select
-                    value={weekStartDay}
-                    onChange={(e) => setWeekStartDay(Number(e.target.value))}
-                    disabled={!canEdit}
-                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value={0}>日曜日</option>
-                    <option value={1}>月曜日</option>
-                    <option value={2}>火曜日</option>
-                    <option value={3}>水曜日</option>
-                    <option value={4}>木曜日</option>
-                    <option value={5}>金曜日</option>
-                    <option value={6}>土曜日</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">締切（週開始の何日前）</label>
+                <div className="flex items-center gap-3">
+                  <span className="text-gray-500">¥</span>
                   <input
                     type="number"
                     min={1}
-                    max={30}
-                    value={weeklyDeadlineDaysBefore}
-                    onChange={(e) => setWeeklyDeadlineDaysBefore(Number(e.target.value))}
+                    value={settings.defaultHourlyWage}
+                    onChange={(e) => setSettings(s => ({ ...s, defaultHourlyWage: Number(e.target.value) }))}
                     disabled={!canEdit}
-                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="例: 3"
+                    className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg font-semibold"
                   />
-                  <p className="mt-1 text-xs text-gray-600">
-                    例: 3日前 → 週開始日の3日前までに提出
+                  <span className="text-gray-500">/時</span>
+                </div>
+                <p className="mt-2 text-xs text-gray-500">
+                  💡 個別の時給は「メンバー管理」から設定できます
+                </p>
+              </SettingCard>
+
+              {/* 深夜割増 */}
+              <SettingCard
+                icon="🌙"
+                title="深夜割増"
+                description="深夜時間帯の割増賃金を設定します"
+                enabled={settings.nightPremiumEnabled}
+                onToggle={(v) => setSettings(s => ({ ...s, nightPremiumEnabled: v }))}
+                disabled={!canEdit}
+                preview={settings.nightPremiumEnabled && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-blue-700">深夜時給</span>
+                    <span className="font-bold text-blue-900">
+                      ¥{previews.nightWage.toLocaleString()}
+                      <span className="text-xs font-normal text-blue-600 ml-1">(+¥{previews.nightBonus.toLocaleString()})</span>
+                    </span>
+                  </div>
+                )}
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">割増率</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        max={2}
+                        value={settings.nightPremiumRate}
+                        onChange={(e) => setSettings(s => ({ ...s, nightPremiumRate: Number(e.target.value) }))}
+                        disabled={!canEdit}
+                        className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="text-gray-500 text-sm whitespace-nowrap">= {Math.round(settings.nightPremiumRate * 100)}%</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">開始時刻</label>
+                    <input
+                      type="time"
+                      value={settings.nightStart}
+                      onChange={(e) => setSettings(s => ({ ...s, nightStart: e.target.value }))}
+                      disabled={!canEdit}
+                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">終了時刻</label>
+                    <input
+                      type="time"
+                      value={settings.nightEnd}
+                      onChange={(e) => setSettings(s => ({ ...s, nightEnd: e.target.value }))}
+                      disabled={!canEdit}
+                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              </SettingCard>
+
+              {/* 残業割増 */}
+              <SettingCard
+                icon="⏱️"
+                title="残業割増"
+                description="1日の労働時間が閾値を超えた場合の割増を設定します"
+                enabled={settings.overtimePremiumEnabled}
+                onToggle={(v) => setSettings(s => ({ ...s, overtimePremiumEnabled: v }))}
+                disabled={!canEdit}
+                preview={settings.overtimePremiumEnabled && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-blue-700">
+                      {previews.overtimeThresholdHours}時間{previews.overtimeThresholdMins > 0 && `${previews.overtimeThresholdMins}分`}超過後の時給
+                    </span>
+                    <span className="font-bold text-blue-900">
+                      ¥{previews.overtimeWage.toLocaleString()}
+                      <span className="text-xs font-normal text-blue-600 ml-1">(+¥{previews.overtimeBonus.toLocaleString()})</span>
+                    </span>
+                  </div>
+                )}
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">割増率</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        max={2}
+                        value={settings.overtimePremiumRate}
+                        onChange={(e) => setSettings(s => ({ ...s, overtimePremiumRate: Number(e.target.value) }))}
+                        disabled={!canEdit}
+                        className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="text-gray-500 text-sm whitespace-nowrap">= {Math.round(settings.overtimePremiumRate * 100)}%</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">閾値（分）</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={1440}
+                      value={settings.overtimeDailyThresholdMinutes}
+                      onChange={(e) => setSettings(s => ({ ...s, overtimeDailyThresholdMinutes: Number(e.target.value) }))}
+                      disabled={!canEdit}
+                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="480"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">480分 = 8時間</p>
+                  </div>
+                </div>
+              </SettingCard>
+
+              {/* 休日割増 */}
+              <SettingCard
+                icon="🎌"
+                title="休日割増"
+                description="休日勤務時の割増賃金を設定します"
+                enabled={settings.holidayPremiumEnabled}
+                onToggle={(v) => setSettings(s => ({ ...s, holidayPremiumEnabled: v }))}
+                disabled={!canEdit}
+                preview={settings.holidayPremiumEnabled && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-blue-700">休日時給</span>
+                    <span className="font-bold text-blue-900">
+                      ¥{previews.holidayWage.toLocaleString()}
+                      <span className="text-xs font-normal text-blue-600 ml-1">(+¥{previews.holidayBonus.toLocaleString()})</span>
+                    </span>
+                  </div>
+                )}
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">割増率</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        max={2}
+                        value={settings.holidayPremiumRate}
+                        onChange={(e) => setSettings(s => ({ ...s, holidayPremiumRate: Number(e.target.value) }))}
+                        disabled={!canEdit}
+                        className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="text-gray-500 text-sm whitespace-nowrap">= {Math.round(settings.holidayPremiumRate * 100)}%</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">休日の定義</label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={settings.holidayIncludesWeekend}
+                        onChange={(e) => setSettings(s => ({ ...s, holidayIncludesWeekend: e.target.checked }))}
+                        disabled={!canEdit}
+                        className="h-4 w-4 rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-gray-700">土日も休日扱いにする</span>
+                    </label>
+                    <p className="mt-1 text-xs text-gray-500">※ 祝日は自動で含まれます</p>
+                  </div>
+                </div>
+              </SettingCard>
+
+              {/* 交通費 */}
+              <SettingCard
+                icon="🚃"
+                title="交通費"
+                description="1シフトあたりの交通費を設定します"
+                enabled={settings.transportAllowanceEnabled}
+                onToggle={(v) => setSettings(s => ({ ...s, transportAllowanceEnabled: v }))}
+                disabled={!canEdit}
+              >
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">1シフトあたり</label>
+                  <div className="flex items-center gap-3">
+                    <span className="text-gray-500">¥</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={settings.transportAllowancePerShift}
+                      onChange={(e) => setSettings(s => ({ ...s, transportAllowancePerShift: Number(e.target.value) }))}
+                      disabled={!canEdit}
+                      className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-gray-500">
+                    💡 個別の交通費は
+                    <button onClick={() => router.push('/company/members')} className="text-blue-600 hover:underline mx-1">メンバー管理</button>
+                    から設定できます
                   </p>
                 </div>
-              </div>
-            )}
+              </SettingCard>
+            </>
+          )}
 
-            {shiftSubmissionCycle === 'monthly' && (
-              <div className="bg-green-50 p-4 rounded-lg">
-                <label className="block text-sm font-medium text-gray-700 mb-1">締切日（毎月何日まで）</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={31}
-                  value={monthlyDeadlineDay}
-                  onChange={(e) => setMonthlyDeadlineDay(Number(e.target.value))}
-                  disabled={!canEdit}
-                  className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="例: 25"
-                />
-                <p className="mt-1 text-xs text-gray-600">
-                  例: 25日 → 毎月25日までに翌月のシフトを提出
-                </p>
-              </div>
-            )}
-          </div>
+          {/* シフトルールタブ */}
+          {activeTab === 'shift' && (
+            <SettingCard
+              icon="📅"
+              title="シフト提出ルール"
+              description="スタッフがシフトを提出する締切を設定します"
+            >
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-2">提出サイクル</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { value: 'weekly', label: '毎週' },
+                      { value: 'biweekly', label: '隔週' },
+                      { value: 'monthly', label: '毎月' },
+                    ].map((option) => (
+                      <button
+                        key={option.value}
+                        onClick={() => setShiftSubmissionCycle(option.value as 'weekly' | 'biweekly' | 'monthly')}
+                        disabled={!canEdit}
+                        className={`px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                          shiftSubmissionCycle === option.value
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        } ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-          {/* タイムカード表示設定 */}
-          <hr className="my-2" />
-          <h3 className="text-md font-semibold text-gray-900">タイムカード表示設定</h3>
-          <div className="grid grid-cols-1 gap-6">
-            <div className="flex items-center justify-between bg-gray-50 p-4 rounded-lg">
-              <div>
-                <label htmlFor="watchAdmin" className="text-sm font-medium text-gray-900">管理者ダッシュボードにタイムカードを表示</label>
-                <p className="text-xs text-gray-600 mt-1">有効にすると管理者がスタッフのタイムカードを編集できます。無効にするとアルバイトが個別に記録します。</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setPendingWatchAdminValue(!isWatchAdmin);
-                  setShowWatchAdminDialog(true);
-                }}
-                disabled={!canEdit}
-                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                  isWatchAdmin ? 'bg-blue-600' : 'bg-gray-200'
-                } ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                <span
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                    isWatchAdmin ? 'translate-x-5' : 'translate-x-0'
-                  }`}
-                />
-              </button>
-            </div>
-          </div>
+                {(shiftSubmissionCycle === 'weekly' || shiftSubmissionCycle === 'biweekly') && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-blue-50 rounded-lg">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">週の開始日</label>
+                      <select
+                        value={weekStartDay}
+                        onChange={(e) => setWeekStartDay(Number(e.target.value))}
+                        disabled={!canEdit}
+                        className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                      >
+                        <option value={0}>日曜日</option>
+                        <option value={1}>月曜日</option>
+                        <option value={2}>火曜日</option>
+                        <option value={3}>水曜日</option>
+                        <option value={4}>木曜日</option>
+                        <option value={5}>金曜日</option>
+                        <option value={6}>土曜日</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">締切（週開始の何日前）</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={30}
+                        value={weeklyDeadlineDaysBefore}
+                        onChange={(e) => setWeeklyDeadlineDaysBefore(Number(e.target.value))}
+                        disabled={!canEdit}
+                        className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <p className="mt-1 text-xs text-gray-600">
+                        例: 3日前 → 週開始日の3日前までに提出
+                      </p>
+                    </div>
+                  </div>
+                )}
 
-          <div className="flex justify-end">
-            <button
-              onClick={save}
-              disabled={!canEdit || saving}
-              className={`px-4 py-2 rounded ${canEdit ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-200 text-gray-500 cursor-not-allowed'}`}
-            >{saving ? '保存中...' : '保存'}</button>
-          </div>
+                {shiftSubmissionCycle === 'monthly' && (
+                  <div className="p-4 bg-green-50 rounded-lg">
+                    <label className="block text-xs font-medium text-gray-600 mb-1">締切日（毎月何日まで）</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={31}
+                      value={monthlyDeadlineDay}
+                      onChange={(e) => setMonthlyDeadlineDay(Number(e.target.value))}
+                      disabled={!canEdit}
+                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    />
+                    <p className="mt-1 text-xs text-gray-600">
+                      例: 25日 → 毎月25日までに翌月のシフトを提出
+                    </p>
+                  </div>
+                )}
+              </div>
+            </SettingCard>
+          )}
+
+          {/* タイムカードタブ */}
+          {activeTab === 'timecard' && (
+            <SettingCard
+              icon="⏰"
+              title="タイムカード記録方法"
+              description="誰がタイムカードを記録するかを設定します"
+            >
+              <div className="space-y-4">
+                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-900">管理者が記録</div>
+                    <p className="text-sm text-gray-500 mt-0.5">管理者ダッシュボードからスタッフの勤怠を記録します</p>
+                  </div>
+                  <Toggle
+                    enabled={isWatchAdmin}
+                    onChange={(v) => {
+                      setPendingWatchAdminValue(v);
+                      setShowWatchAdminDialog(true);
+                    }}
+                    disabled={!canEdit}
+                  />
+                </div>
+                
+                <div className={`p-4 rounded-lg border-2 transition-all ${isWatchAdmin ? 'border-blue-200 bg-blue-50' : 'border-green-200 bg-green-50'}`}>
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl">{isWatchAdmin ? '👔' : '👤'}</span>
+                    <div>
+                      <div className="font-medium text-gray-900">
+                        {isWatchAdmin ? '現在: 管理者モード' : '現在: スタッフモード'}
+                      </div>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {isWatchAdmin 
+                          ? '管理者が「タイムカード管理」画面からスタッフの出退勤を記録します。' 
+                          : '各スタッフが自分のダッシュボードから出退勤を記録します。'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </SettingCard>
+          )}
         </div>
       </main>
 
-      {/* タイムカード表示設定変更ダイアログ */}
+      {/* 固定フッター（保存ボタン） */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-gray-500">
+              {hasChanges ? (
+                <span className="flex items-center gap-1.5 text-amber-600">
+                  <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                  未保存の変更があります
+                </span>
+              ) : (
+                <span className="text-gray-400">変更なし</span>
+              )}
+            </div>
+            <button
+              onClick={save}
+              disabled={!canEdit || saving || !hasChanges}
+              className={`px-6 py-2.5 rounded-lg font-medium transition-all ${
+                canEdit && hasChanges
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm'
+                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+              }`}
+            >
+              {saving ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  保存中...
+                </span>
+              ) : '設定を保存'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* タイムカード設定変更確認ダイアログ */}
       {showWatchAdminDialog && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/50 z-50">
-          <div className="bg-white rounded-lg shadow-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-bold mb-4">タイムカード表示設定の変更</h3>
-            <p className="text-sm text-gray-700 mb-6">
-              {pendingWatchAdminValue
-                ? '管理者ダッシュボードにタイムカードを表示します。管理者がスタッフのタイムカードを作成・編集できるようになります。'
-                : 'アルバイトダッシュボードにタイムカードを表示します。各アルバイトが個別に出退勤を記録します。'}
-            </p>
-            <p className="text-sm text-yellow-700 bg-yellow-50 p-3 rounded mb-6">
-              ⚠️ この設定を変更すると、タイムカードの記録方法が変わります。よろしいですか？
-            </p>
-            <div className="flex gap-3 justify-end">
+        <div className="fixed inset-0 flex items-center justify-center bg-black/50 z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <span className="text-3xl">{pendingWatchAdminValue ? '👔' : '👤'}</span>
+                <h3 className="text-lg font-bold text-gray-900">記録方法の変更</h3>
+              </div>
+              <p className="text-sm text-gray-600 mb-4">
+                {pendingWatchAdminValue
+                  ? '管理者ダッシュボードにタイムカードを表示します。管理者がスタッフのタイムカードを作成・編集できるようになります。'
+                  : 'アルバイトダッシュボードにタイムカードを表示します。各アルバイトが個別に出退勤を記録します。'}
+              </p>
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg mb-4">
+                <p className="text-sm text-amber-800">
+                  ⚠️ この設定を変更すると、タイムカードの記録方法が変わります。
+                </p>
+              </div>
+            </div>
+            <div className="flex border-t">
               <button
                 onClick={() => setShowWatchAdminDialog(false)}
-                className="px-4 py-2 rounded bg-gray-200 text-gray-700 hover:bg-gray-300"
+                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors"
               >
                 キャンセル
               </button>
@@ -557,7 +829,7 @@ export default function OrganizationSettingsPage() {
                   setIsWatchAdmin(pendingWatchAdminValue);
                   setShowWatchAdminDialog(false);
                 }}
-                className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+                className="flex-1 px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 transition-colors border-l"
               >
                 変更する
               </button>
