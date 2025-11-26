@@ -147,3 +147,10 @@ export interface ConfirmModalProps {
   variant?: ConfirmModalVariant;
   icon?: React.ReactNode;
 }
+
+export interface BreakPeriod {
+  startAt: Timestamp;
+  endAt?: Timestamp;
+}
+
+

@@ -8,14 +8,19 @@ import JapaneseHolidays from 'japanese-holidays';
 import { db } from '@/lib/firebase';
 import { useToast, ToastProvider } from '@/components/Toast';
 
+// 休憩期間の型
+interface BreakPeriod {
+  startAt: Timestamp;
+  endAt?: Timestamp;
+}
+
 interface TimecardRow {
   id: string;
   userId: string;
   dateKey: string;
   date: Date;
   clockInAt?: Timestamp;
-  breakStartAt?: Timestamp;
-  breakEndAt?: Timestamp;
+  breaks: BreakPeriod[]; // 複数休憩対応
   clockOutAt?: Timestamp;
   hourlyWage?: number;
   status: 'draft' | 'pending' | 'approved' | 'rejected';
@@ -58,14 +63,12 @@ export default function PayrollPage() {
   const [timecards, setTimecards] = useState<TimecardRow[]>([]);
   const [userInfoMap, setUserInfoMap] = useState<Record<string, UserInfo>>({});
   const [memberTransport, setMemberTransport] = useState<Record<string, number>>({});
-  const [monthlyReports, setMonthlyReports] = useState<Record<string, any>>({}); // userId -> report data
+  const [monthlyReports, setMonthlyReports] = useState<Record<string, any>>({});
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{
     clockInAt: string;
     clockOutAt: string;
-    breakStartAt: string;
-    breakEndAt: string;
   } | null>(null);
   const [orgSettings, setOrgSettings] = useState<{
     defaultHourlyWage: number;
@@ -145,8 +148,7 @@ export default function PayrollPage() {
           dateKey: data.dateKey,
           date: new Date(year, month - 1, day),
           clockInAt: data.clockInAt,
-          breakStartAt: data.breakStartAt,
-          breakEndAt: data.breakEndAt,
+          breaks: data.breaks || [], // 配列として取得
           clockOutAt: data.clockOutAt,
           hourlyWage: data.hourlyWage,
           status: data.status || 'approved',
@@ -180,63 +182,78 @@ export default function PayrollPage() {
               overtimeDailyThresholdMinutes: Number(o.overtimeDailyThresholdMinutes ?? 480),
               holidayPremiumEnabled: !!o.holidayPremiumEnabled,
               holidayPremiumRate: Number(o.holidayPremiumRate ?? 0.35),
-              holidayIncludesWeekend: o.holidayIncludesWeekend ?? true,
+              holidayIncludesWeekend: !!o.holidayIncludesWeekend,
               transportAllowanceEnabled: !!o.transportAllowanceEnabled,
               transportAllowancePerShift: Number(o.transportAllowancePerShift ?? 0),
             });
           }
         } catch (e) {
-          console.warn('[Payroll] failed to load org settings', e);
+          console.error('[Payroll] Error loading org settings:', e);
         }
 
-        // メンバー個別設定（交通費）を取得
-        const memberSettingsSnap = await getDocs(collection(db, 'organizations', userProfile.currentOrganizationId, 'members'));
-        const transportMap = new Map<string, number>();
-        memberSettingsSnap.forEach((d) => {
-          const v = (d.data() as any).transportAllowancePerShift;
-          if (typeof v === 'number') transportMap.set(d.id, v);
-        });
-        setMemberTransport(Object.fromEntries(transportMap));
-
-        // 月次レポートの状態を取得（承認済みユーザーを確認）
-        const y = selectedMonth.getFullYear();
-        const m = selectedMonth.getMonth();
-        const reportMap: Record<string, any> = {};
-        const uniqueUserIds = Array.from(new Set(timecards.map(r => r.userId)));
-        for (const userId of uniqueUserIds) {
-          const reportId = `${userProfile.currentOrganizationId}_${y}-${String(m + 1).padStart(2, '0')}_${userId}`;
-          try {
-            const reportSnap = await getDoc(doc(db, 'monthlyReports', reportId));
-            if (reportSnap.exists()) {
-              reportMap[userId] = reportSnap.data();
+        // メンバー交通費
+        try {
+          const memSnap = await getDocs(collection(db, 'organizations', userProfile.currentOrganizationId, 'members'));
+          const tMap: Record<string, number> = {};
+          memSnap.docs.forEach((d) => {
+            const data = d.data() as any;
+            if (data.transportAllowance !== undefined) {
+              tMap[d.id] = Number(data.transportAllowance);
             }
-          } catch (e) {
-            console.warn(`[Payroll] Failed to load report for user ${userId}`, e);
-          }
+          });
+          setMemberTransport(tMap);
+        } catch (e) {
+          console.error('[Payroll] Error loading member transport:', e);
         }
-        setMonthlyReports(reportMap);
-        setError(null);
-      } catch (e: any) {
-        console.error('[Payroll] load error', e);
-        if (e?.code === 'failed-precondition' || e?.message?.includes('index')) {
-          setError('データベースのインデックスを構築中です。数分後に再度お試しください。');
-        } else {
-          setError('データの読み込みに失敗しました。');
+
+        // 月次レポート取得
+        try {
+          const y = selectedMonth.getFullYear();
+          const m = selectedMonth.getMonth() + 1;
+          const reportPrefix = `${userProfile.currentOrganizationId}_${y}-${String(m).padStart(2, '0')}`;
+          const reportsSnap = await getDocs(
+            query(
+              collection(db, 'monthlyReports'),
+              where('organizationId', '==', userProfile.currentOrganizationId),
+              where('year', '==', y),
+              where('month', '==', m)
+            )
+          );
+          const reports: Record<string, any> = {};
+          reportsSnap.docs.forEach((d) => {
+            const data = d.data();
+            reports[data.userId] = { id: d.id, ...data };
+          });
+          setMonthlyReports(reports);
+        } catch (e) {
+          console.error('[Payroll] Error loading monthly reports:', e);
         }
       } finally {
         setLoading(false);
       }
     };
     load();
-  }, [userProfile?.currentOrganizationId, selectedMonth, timecards]);
+  }, [userProfile?.currentOrganizationId, selectedMonth]);
 
-  // タイムスタンプ間の分数計算
+  // ヘルパー関数
   const minutesBetweenTimestamps = (start?: Timestamp, end?: Timestamp) => {
     if (!start || !end) return 0;
     return Math.max(0, Math.floor((end.toMillis() - start.toMillis()) / 60000));
   };
 
-  // 深夜時間の計算（タイムスタンプベース）
+  // 複数休憩の合計時間を計算
+  const calcTotalBreakMinutes = (breaks: BreakPeriod[]): number => {
+    if (!breaks || breaks.length === 0) return 0;
+    let total = 0;
+    for (const b of breaks) {
+      if (b.startAt && b.endAt) {
+        total += Math.max(0, Math.round((b.endAt.toMillis() - b.startAt.toMillis()) / 60000));
+      }
+    }
+    return total;
+  };
+
+  // 深夜時間の計算
   const calcNightMinutes = (clockIn?: Timestamp, clockOut?: Timestamp, nightStart?: string, nightEnd?: string) => {
     if (!clockIn || !clockOut || !nightStart || !nightEnd) return 0;
     
@@ -271,7 +288,7 @@ export default function PayrollPage() {
     const hourly = tc.hourlyWage ?? orgSettings?.defaultHourlyWage ?? 1100;
     
     const grossMin = minutesBetweenTimestamps(tc.clockInAt, tc.clockOutAt);
-    const breakMin = minutesBetweenTimestamps(tc.breakStartAt, tc.breakEndAt);
+    const breakMin = calcTotalBreakMinutes(tc.breaks); // 配列から計算
     const totalMin = grossMin - breakMin;
     
     const base = hourly * (totalMin / 60);
@@ -302,23 +319,28 @@ export default function PayrollPage() {
     return { base, night, overtime, holiday, transport, total, totalMin, nightMin, overtimeMin, breakMin };
   };
 
-  // ユーザー別申請集計
+  // アバターURL生成関数（company/membersと同じ形式）
+  const getAvatarUrl = (seed: string, bgColor?: string) => {
+    const base = `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(seed)}`;
+    const params = bgColor ? `&backgroundColor=${encodeURIComponent(bgColor)}` : '&backgroundType=gradientLinear';
+    return `${base}${params}&fontWeight=700&radius=50`;
+  };
+
+  // ユーザーごとに集計
   const applications = useMemo(() => {
     const map = new Map<string, UserApplication>();
     
     for (const tc of timecards) {
       const userId = tc.userId;
-      
       if (!map.has(userId)) {
         const info = userInfoMap[userId] || { name: userId };
         const seed = info.seed || info.name || userId;
         const bgColor = info.bgColor;
-        const avatarUrl = `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(seed)}${bgColor ? `&backgroundColor=${encodeURIComponent(bgColor)}` : '&backgroundType=gradientLinear'}&radius=50&fontWeight=700`;
         
         map.set(userId, {
           userId,
           userName: info.name,
-          avatarUrl,
+          avatarUrl: getAvatarUrl(seed, bgColor),
           timecards: [],
           workDays: 0,
           totalMinutes: 0,
@@ -376,18 +398,38 @@ export default function PayrollPage() {
           status: 'approved',
           updatedAt: now,
         };
+        // 退勤がない場合は現在時刻を設定
         if (tc.clockInAt && !tc.clockOutAt) {
           updates.clockOutAt = now;
         }
-        if (tc.breakStartAt && !tc.breakEndAt) {
-          updates.breakEndAt = updates.clockOutAt || now;
+        // 休憩中（最後の休憩にendAtがない）の場合は終了時刻を設定
+        if (tc.breaks.length > 0) {
+          const lastBreak = tc.breaks[tc.breaks.length - 1];
+          if (lastBreak && !lastBreak.endAt) {
+            const updatedBreaks = tc.breaks.map((b, i) =>
+              i === tc.breaks.length - 1 ? { ...b, endAt: updates.clockOutAt || now } : b
+            );
+            updates.breaks = updatedBreaks;
+          }
         }
         await updateDoc(doc(db, 'timecards', tc.id), updates);
         updatedIds.push(tc.id);
       }
       await saveMonthlyReport(userId);
-      // state更新: 承認済みにしたタイムカードだけstatusを更新
-      setTimecards(prev => prev.map(tc => updatedIds.includes(tc.id) ? { ...tc, status: 'approved', updatedAt: now, clockOutAt: tc.clockOutAt || now, breakEndAt: tc.breakEndAt || (tc.breakStartAt && !tc.breakEndAt ? (tc.clockOutAt || now) : tc.breakEndAt) } : tc));
+      setTimecards(prev => prev.map(tc => {
+        if (!updatedIds.includes(tc.id)) return tc;
+        const updates: any = { status: 'approved', updatedAt: now };
+        if (!tc.clockOutAt) updates.clockOutAt = now;
+        if (tc.breaks.length > 0) {
+          const lastBreak = tc.breaks[tc.breaks.length - 1];
+          if (lastBreak && !lastBreak.endAt) {
+            updates.breaks = tc.breaks.map((b, i) =>
+              i === tc.breaks.length - 1 ? { ...b, endAt: updates.clockOutAt || now } : b
+            );
+          }
+        }
+        return { ...tc, ...updates };
+      }));
       showSuccessToast('承認が完了しました');
     } catch (e) {
       console.error('[Payroll] approve error', e);
@@ -403,106 +445,68 @@ export default function PayrollPage() {
     const m = selectedMonth.getMonth() + 1;
     const reportId = `${userProfile.currentOrganizationId}_${y}-${String(m).padStart(2, '0')}_${userId}`;
     
-    // ユーザー情報取得（承認前の計算結果を使用）
     const userApp = applications.find((app: any) => app.userId === userId);
     if (!userApp) {
       console.error('[Payroll] User application not found for userId:', userId);
       return;
     }
     
-    // 承認済みタイムカードが0件でもレポートを作成（今回承認したものが含まれるはず）
-    console.log('[Payroll] Saving monthly report for user:', userId, 'reportId:', reportId);
-    
-    // 既存のレポートを確認（バージョン管理のため）
     const existingReportSnap = await getDoc(doc(db, 'monthlyReports', reportId));
     const existingData = existingReportSnap.exists() ? existingReportSnap.data() : null;
-    const currentVersion = existingData?.version || 0;
-    const newVersion = currentVersion + 1;
+    const version = existingData ? (existingData.version || 0) + 1 : 1;
     
-    // レポートデータを作成
-    try {
-      const now = Timestamp.now();
-      await setDoc(doc(db, 'monthlyReports', reportId), {
-        organizationId: userProfile.currentOrganizationId,
-        userId: userId,
-        userName: userApp.userName,
-        year: y,
-        month: m,
-        // 集計データ
-        workDays: userApp.workDays,
-        totalWorkMinutes: userApp.totalMinutes,
-        totalBreakMinutes: userApp.breakMinutes,
-        totalNightMinutes: userApp.nightMinutes,
-        totalOvertimeMinutes: userApp.overtimeMinutes,
-        baseWage: userApp.base,
-        nightPremium: userApp.night,
-        overtimePremium: userApp.overtime,
-        holidayPremium: userApp.holiday,
-        transportAllowance: userApp.transport,
-        totalAmount: userApp.total,
-        timecardCount: userApp.timecards.length,
-        // レポート状態
-        status: 'confirmed',
-        version: newVersion,
-        // 承認情報
-        approvedAt: now,
-        approvedBy: userProfile.uid,
-        // タイムスタンプ
-        createdAt: existingData?.createdAt || now,
-        updatedAt: now,
-      });
-      console.log('[Payroll] Monthly report saved successfully, version:', newVersion);
-    } catch (err) {
-      console.error('[Payroll] Error saving monthly report:', err);
-      throw err;
-    }
+    const reportData = {
+      organizationId: userProfile.currentOrganizationId,
+      userId,
+      userName: userApp.userName,
+      year: y,
+      month: m,
+      workDays: userApp.workDays,
+      totalWorkMinutes: userApp.totalMinutes,
+      totalBreakMinutes: userApp.breakMinutes,
+      totalNightMinutes: userApp.nightMinutes,
+      totalOvertimeMinutes: userApp.overtimeMinutes,
+      baseWage: Math.round(userApp.base),
+      nightPremium: Math.round(userApp.night),
+      overtimePremium: Math.round(userApp.overtime),
+      holidayPremium: Math.round(userApp.holiday),
+      transportAllowance: Math.round(userApp.transport),
+      totalAmount: userApp.total,
+      timecardCount: userApp.timecards.length,
+      status: 'confirmed',
+      version,
+      approvedAt: Timestamp.now(),
+      approvedBy: userProfile.uid,
+      createdAt: existingData?.createdAt || Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    };
+    
+    await setDoc(doc(db, 'monthlyReports', reportId), reportData);
+    setMonthlyReports(prev => ({ ...prev, [userId]: { id: reportId, ...reportData } }));
   };
 
-  // 却下処理
-  const handleReject = async (userId: string) => {
-    const reason = prompt('却下理由を入力してください（任意）', '');
-    if (reason === null) return; // キャンセル時は何もしない
+  // 差し戻し
+  const handleRevert = async (userId: string) => {
+    const reason = window.prompt('差し戻し理由を入力してください（任意）');
+    if (reason === null) return;
+    
     try {
-      const userTimecards = timecards.filter(tc => tc.userId === userId && tc.status === 'pending');
-      const now = Timestamp.now();
-      const updatedIds: string[] = [];
-      for (const tc of userTimecards) {
-        await updateDoc(doc(db, 'timecards', tc.id), {
-          status: 'rejected',
-          rejectReason: reason || '',
-          updatedAt: now,
-        });
-        updatedIds.push(tc.id);
+      const report = monthlyReports[userId];
+      if (!report?.id) {
+        showErrorToast('月次レポートが見つかりません');
+        return;
       }
-      setTimecards(prev => prev.map(tc => updatedIds.includes(tc.id) ? { ...tc, status: 'rejected', rejectReason: reason || '', updatedAt: now } : tc));
-      showSuccessToast('却下が完了しました');
-    } catch (e) {
-      console.error('[Payroll] reject error', e);
-      showErrorToast('却下に失敗しました');
-    }
-  };
-
-  // 月次レポート差し戻し処理
-  const handleRevertReport = async (userId: string) => {
-    if (!userProfile?.currentOrganizationId) return;
-    const reason = prompt('差し戻し理由を入力してください（任意）', '');
-    if (reason === null) return; // キャンセル時は何もしない
-    const y = selectedMonth.getFullYear();
-    const m = selectedMonth.getMonth() + 1;
-    const reportId = `${userProfile.currentOrganizationId}_${y}-${String(m).padStart(2, '0')}_${userId}`;
-    try {
-      // 1. 月次レポートを差し戻し済みに更新
+      const reportId = report.id;
+      
       await updateDoc(doc(db, 'monthlyReports', reportId), {
         status: 'reverted',
         revertedAt: Timestamp.now(),
-        revertedBy: userProfile.uid,
+        revertedBy: userProfile?.uid,
         revertReason: reason || '',
         updatedAt: Timestamp.now(),
       });
-      // 2. 該当月の全タイムカードを approved → pending に戻す
-      const userTimecards = timecards.filter(
-        tc => tc.userId === userId && tc.status === 'approved'
-      );
+      
+      const userTimecards = timecards.filter(tc => tc.userId === userId && tc.status === 'approved');
       const now = Timestamp.now();
       const updatedIds: string[] = [];
       for (const tc of userTimecards) {
@@ -527,8 +531,6 @@ export default function PayrollPage() {
     setEditForm({
       clockInAt: fmt(tc.clockInAt),
       clockOutAt: fmt(tc.clockOutAt),
-      breakStartAt: fmt(tc.breakStartAt),
-      breakEndAt: fmt(tc.breakEndAt),
     });
   };
 
@@ -547,276 +549,234 @@ export default function PayrollPage() {
       const updates: any = { updatedAt: Timestamp.now() };
       if (editForm.clockInAt) updates.clockInAt = timeToTimestamp(tc.dateKey, editForm.clockInAt);
       if (editForm.clockOutAt) updates.clockOutAt = timeToTimestamp(tc.dateKey, editForm.clockOutAt);
-      if (editForm.breakStartAt) updates.breakStartAt = timeToTimestamp(tc.dateKey, editForm.breakStartAt);
-      if (editForm.breakEndAt) updates.breakEndAt = timeToTimestamp(tc.dateKey, editForm.breakEndAt);
       await updateDoc(doc(db, 'timecards', editingCardId), updates);
       setTimecards(prev => prev.map(t => t.id === editingCardId ? { ...t, ...updates } : t));
-      showSuccessToast('更新しました');
       setEditingCardId(null);
       setEditForm(null);
+      showSuccessToast('保存しました');
     } catch (e) {
-      console.error('[Payroll] edit error', e);
-      showErrorToast('更新に失敗しました');
+      console.error('[Payroll] save error', e);
+      showErrorToast('保存に失敗しました');
     }
   };
 
-  // 詳細表示
-  const selectedApp = applications.find(a => a.userId === selectedUserId);
+  // 編集キャンセル
+  const cancelEdit = () => {
+    setEditingCardId(null);
+    setEditForm(null);
+  };
 
   const prevMonth = () => setSelectedMonth(new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() - 1, 1));
   const nextMonth = () => setSelectedMonth(new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1));
 
+  const selectedApp = selectedUserId ? applications.find(a => a.userId === selectedUserId) : null;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">読み込み中...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <ToastProvider>
-      <div className="min-h-screen bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 py-6">
-          <div className="mb-6 flex items-center justify-between">
-            <h1 className="text-2xl font-bold">給与計算（勤怠申請）</h1>
-            <button onClick={() => router.push('/company/dashboard')} className="text-sm text-gray-600 hover:text-gray-900">← ダッシュボード</button>
-          </div>
-
-          {/* エラー表示 */}
-          {error && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-              <div className="flex items-start gap-3">
-                <svg className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-                <div className="flex-1">
-                  <p className="font-semibold text-yellow-800">{error}</p>
-                  <button 
-                    onClick={() => window.location.reload()} 
-                    className="mt-2 px-3 py-1 text-sm rounded bg-yellow-600 text-white hover:bg-yellow-700"
-                  >
-                    再読み込み
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="bg-white rounded-lg shadow p-4 mb-6 flex flex-wrap gap-3 items-center">
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto px-4 py-6">
+        {/* ヘッダー */}
+        <div className="mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold">給与管理</h1>
             <div className="flex items-center gap-2">
-              <button onClick={prevMonth} className="px-2 py-1 border rounded">←</button>
-              <div className="font-semibold">{selectedMonth.getFullYear()}年 {selectedMonth.getMonth() + 1}月</div>
-              <button onClick={nextMonth} className="px-2 py-1 border rounded">→</button>
-            </div>
-            <div className="ml-auto text-sm text-gray-600">
-              申請中: {applications.length}件
+              <button onClick={prevMonth} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">←</button>
+              <span className="font-semibold">
+                {selectedMonth.getFullYear()}年{selectedMonth.getMonth() + 1}月
+              </span>
+              <button onClick={nextMonth} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">→</button>
             </div>
           </div>
-
-          {/* 申請一覧 */}
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="p-3 border-b text-left">ユーザー</th>
-                  <th className="p-3 border-b text-center">勤務日数</th>
-                  <th className="p-3 border-b text-center">勤務時間</th>
-                  <th className="p-3 border-b text-center">休憩時間</th>
-                  <th className="p-3 border-b text-center">基本給(円)</th>
-                  <th className="p-3 border-b text-center">深夜(円)</th>
-                  <th className="p-3 border-b text-center">残業(円)</th>
-                  <th className="p-3 border-b text-center">休日(円)</th>
-                  <th className="p-3 border-b text-center">交通費(円)</th>
-                  <th className="p-3 border-b text-center">合計金額(円)</th>
-                  <th className="p-3 border-b text-center">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td className="p-4 text-center" colSpan={11}>読み込み中...</td></tr>
-                ) : applications.length === 0 ? (
-                  <tr><td className="p-4 text-center text-gray-500" colSpan={11}>申請中のタイムカードがありません</td></tr>
-                ) : (
-                  applications.map((app) => (
-                    <tr key={app.userId} className="hover:bg-gray-50">
-                      <td className="p-3 border-b">
-                        <div className="flex items-center gap-2">
-                          <img src={app.avatarUrl} alt={app.userName} className="w-8 h-8 rounded-full ring-1 ring-gray-200" />
-                          <span className="font-medium">{app.userName}</span>
-                        </div>
-                      </td>
-                      <td className="p-3 border-b text-center">{app.workDays}日</td>
-                      <td className="p-3 border-b text-center">{(app.totalMinutes / 60).toFixed(1)}h</td>
-                      <td className="p-3 border-b text-center">{app.breakMinutes}分</td>
-                      <td className="p-3 border-b text-center">¥{Math.round(app.base).toLocaleString('ja-JP')}</td>
-                      <td className="p-3 border-b text-center">¥{Math.round(app.night).toLocaleString('ja-JP')}</td>
-                      <td className="p-3 border-b text-center">¥{Math.round(app.overtime).toLocaleString('ja-JP')}</td>
-                      <td className="p-3 border-b text-center">¥{Math.round(app.holiday).toLocaleString('ja-JP')}</td>
-                      <td className="p-3 border-b text-center">¥{Math.round(app.transport).toLocaleString('ja-JP')}</td>
-                      <td className="p-3 border-b text-center font-semibold text-emerald-600">¥{Math.round(app.total).toLocaleString('ja-JP')}</td>
-                      <td className="p-3 border-b text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <button 
-                            onClick={() => setSelectedUserId(app.userId)} 
-                            className="px-3 py-1 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-700"
-                          >
-                            詳細
-                          </button>
-                          {monthlyReports[app.userId]?.status === 'confirmed' ? (
-                            <button 
-                              onClick={() => handleRevertReport(app.userId)} 
-                              className="px-3 py-1 text-xs rounded bg-amber-600 text-white hover:bg-amber-700"
-                              title="承認済みのレポートを差し戻します"
-                            >
-                              差し戻し
-                            </button>
-                          ) : (
-                            <>
-                              <button 
-                                onClick={() => handleApprove(app.userId)} 
-                                className="px-3 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700"
-                              >
-                                承認
-                              </button>
-                              <button 
-                                onClick={() => handleReject(app.userId)} 
-                                className="px-3 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700"
-                              >
-                                却下
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <button
+            onClick={() => router.push('/company/dashboard')}
+            className="text-sm text-gray-600 hover:text-gray-900"
+          >
+            ← ダッシュボード
+          </button>
         </div>
 
-        {/* 詳細モーダル */}
-        {selectedApp && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedUserId(null)}>
-            <div className="bg-white rounded-lg shadow-2xl max-w-6xl w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-              <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <img src={selectedApp.avatarUrl} alt={selectedApp.userName} className="w-10 h-10 rounded-full ring-1 ring-gray-200" />
-                  <div>
-                    <h2 className="text-xl font-bold">{selectedApp.userName}の勤怠詳細</h2>
-                    <p className="text-sm text-gray-600">{selectedMonth.getFullYear()}年{selectedMonth.getMonth() + 1}月</p>
-                  </div>
-                </div>
-                <button onClick={() => setSelectedUserId(null)} className="text-gray-400 hover:text-gray-600">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
+        {/* 申請一覧 */}
+        {applications.length === 0 ? (
+          <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+            承認待ちの申請はありません
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {applications.map((app) => {
+              const report = monthlyReports[app.userId];
+              const isConfirmed = report?.status === 'confirmed';
               
-              <div className="p-6">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="p-2 border-b text-center">日付</th>
-                      <th className="p-2 border-b text-center">出勤</th>
-                      <th className="p-2 border-b text-center">退勤</th>
-                      <th className="p-2 border-b text-center">休憩開始</th>
-                      <th className="p-2 border-b text-center">休憩終了</th>
-                      <th className="p-2 border-b text-center">休憩(分)</th>
-                      <th className="p-2 border-b text-center">勤務(分)</th>
-                      <th className="p-2 border-b text-center">深夜(分)</th>
-                      <th className="p-2 border-b text-center">残業(分)</th>
-                      <th className="p-2 border-b text-center">時給</th>
-                      <th className="p-2 border-b text-center">交通費(円)</th>
-                      <th className="p-2 border-b text-center">合計(円)</th>
-                      <th className="p-2 border-b text-center">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedApp.timecards.map((tc) => {
-                      const bd = calcBreakdown(tc);
-                      const fmt = (ts?: Timestamp) => ts ? ts.toDate().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '--:--';
-                      const isEditing = editingCardId === tc.id;
-                      
-                      return (
-                        <tr key={tc.id} className="hover:bg-gray-50">
-                          <td className="p-2 border-b text-center">{tc.dateKey}</td>
-                          <td className="p-2 border-b text-center">
-                            {isEditing ? (
-                              <input 
-                                type="time" 
-                                value={editForm?.clockInAt || ''} 
-                                onChange={(e) => setEditForm(prev => prev ? {...prev, clockInAt: e.target.value} : null)}
-                                className="px-2 py-1 border rounded text-sm w-24"
-                              />
-                            ) : fmt(tc.clockInAt)}
-                          </td>
-                          <td className="p-2 border-b text-center">
-                            {isEditing ? (
-                              <input 
-                                type="time" 
-                                value={editForm?.clockOutAt || ''} 
-                                onChange={(e) => setEditForm(prev => prev ? {...prev, clockOutAt: e.target.value} : null)}
-                                className="px-2 py-1 border rounded text-sm w-24"
-                              />
-                            ) : fmt(tc.clockOutAt)}
-                          </td>
-                          <td className="p-2 border-b text-center">
-                            {isEditing ? (
-                              <input 
-                                type="time" 
-                                value={editForm?.breakStartAt || ''} 
-                                onChange={(e) => setEditForm(prev => prev ? {...prev, breakStartAt: e.target.value} : null)}
-                                className="px-2 py-1 border rounded text-sm w-24"
-                              />
-                            ) : fmt(tc.breakStartAt)}
-                          </td>
-                          <td className="p-2 border-b text-center">
-                            {isEditing ? (
-                              <input 
-                                type="time" 
-                                value={editForm?.breakEndAt || ''} 
-                                onChange={(e) => setEditForm(prev => prev ? {...prev, breakEndAt: e.target.value} : null)}
-                                className="px-2 py-1 border rounded text-sm w-24"
-                              />
-                            ) : fmt(tc.breakEndAt)}
-                          </td>
-                          <td className="p-2 border-b text-center">{bd.breakMin}</td>
-                          <td className="p-2 border-b text-center">{bd.totalMin}</td>
-                          <td className="p-2 border-b text-center">{bd.nightMin}</td>
-                          <td className="p-2 border-b text-center">{bd.overtimeMin}</td>
-                          <td className="p-2 border-b text-center">¥{tc.hourlyWage ?? orgSettings?.defaultHourlyWage ?? 1100}</td>
-                          <td className="p-2 border-b text-center">¥{Math.round(bd.transport).toLocaleString('ja-JP')}</td>
-                          <td className="p-2 border-b text-center font-semibold">¥{bd.total.toLocaleString('ja-JP')}</td>
-                          <td className="p-2 border-b text-center">
-                            {isEditing ? (
-                              <div className="flex gap-1 justify-center">
-                                <button onClick={saveEdit} className="px-2 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700">保存</button>
-                                <button onClick={() => { setEditingCardId(null); setEditForm(null); }} className="px-2 py-1 text-xs rounded bg-gray-400 text-white hover:bg-gray-500">キャンセル</button>
-                              </div>
-                            ) : (
-                              <button onClick={() => startEdit(tc)} className="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700">編集</button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot>
-                    <tr className="bg-gray-100 font-semibold">
-                      <td className="p-2 border-t text-center">合計</td>
-                      <td className="p-2 border-t text-center" colSpan={4}></td>
-                      <td className="p-2 border-t text-center">{selectedApp.breakMinutes}分</td>
-                      <td className="p-2 border-t text-center">{selectedApp.totalMinutes}分</td>
-                      <td className="p-2 border-t text-center">{selectedApp.nightMinutes}分</td>
-                      <td className="p-2 border-t text-center">{selectedApp.overtimeMinutes}分</td>
-                      <td className="p-2 border-t text-center"></td>
-                      <td className="p-2 border-t text-center">¥{Math.round(selectedApp.transport).toLocaleString('ja-JP')}</td>
-                      <td className="p-2 border-t text-center text-emerald-600">¥{Math.round(selectedApp.total).toLocaleString('ja-JP')}</td>
-                      <td className="p-2 border-t text-center"></td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </div>
+              return (
+                <div key={app.userId} className="bg-white rounded-lg shadow overflow-hidden">
+                  {/* ユーザーヘッダー */}
+                  <div 
+                    className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50"
+                    onClick={() => setSelectedUserId(selectedUserId === app.userId ? null : app.userId)}
+                  >
+                    <div className="flex items-center gap-4">
+                      <img src={app.avatarUrl} alt="" className="w-10 h-10 rounded-full" />
+                      <div>
+                        <div className="font-semibold">{app.userName}</div>
+                        <div className="text-sm text-gray-500">
+                          {app.workDays}日勤務 / {Math.floor(app.totalMinutes / 60)}時間{app.totalMinutes % 60}分
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <div className="text-lg font-bold text-blue-600">¥{app.total.toLocaleString()}</div>
+                        <div className="text-xs text-gray-500">
+                          {isConfirmed ? (
+                            <span className="text-green-600">承認済み</span>
+                          ) : (
+                            <span className="text-yellow-600">申請中</span>
+                          )}
+                        </div>
+                      </div>
+                      {!isConfirmed && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleApprove(app.userId); }}
+                          className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+                        >
+                          承認
+                        </button>
+                      )}
+                      {isConfirmed && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleRevert(app.userId); }}
+                          className="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600"
+                        >
+                          差し戻し
+                        </button>
+                      )}
+                      <span className="text-gray-400">{selectedUserId === app.userId ? '▲' : '▼'}</span>
+                    </div>
+                  </div>
+
+                  {/* 詳細テーブル */}
+                  {selectedUserId === app.userId && selectedApp && (
+                    <div className="border-t">
+                      <div className="p-4 bg-gray-50 grid grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <span className="text-gray-500">基本給:</span>
+                          <span className="ml-2 font-semibold">¥{Math.round(app.base).toLocaleString()}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">深夜:</span>
+                          <span className="ml-2 font-semibold">¥{Math.round(app.night).toLocaleString()}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">残業:</span>
+                          <span className="ml-2 font-semibold">¥{Math.round(app.overtime).toLocaleString()}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">休日:</span>
+                          <span className="ml-2 font-semibold">¥{Math.round(app.holiday).toLocaleString()}</span>
+                        </div>
+                      </div>
+          
+                      <div className="p-6">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="p-2 border-b text-center">日付</th>
+                              <th className="p-2 border-b text-center">出勤</th>
+                              <th className="p-2 border-b text-center">退勤</th>
+                              <th className="p-2 border-b text-center">休憩(分)</th>
+                              <th className="p-2 border-b text-center">勤務(分)</th>
+                              <th className="p-2 border-b text-center">深夜(分)</th>
+                              <th className="p-2 border-b text-center">残業(分)</th>
+                              <th className="p-2 border-b text-center">時給</th>
+                              <th className="p-2 border-b text-center">交通費(円)</th>
+                              <th className="p-2 border-b text-center">合計(円)</th>
+                              <th className="p-2 border-b text-center">操作</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedApp.timecards.map((tc) => {
+                              const bd = calcBreakdown(tc);
+                              const fmt = (ts?: Timestamp) => ts ? ts.toDate().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '--:--';
+                              const isEditing = editingCardId === tc.id;
+                              
+                              return (
+                                <tr key={tc.id} className="hover:bg-gray-50">
+                                  <td className="p-2 border-b text-center">{tc.dateKey}</td>
+                                  <td className="p-2 border-b text-center">
+                                    {isEditing ? (
+                                      <input 
+                                        type="time" 
+                                        value={editForm?.clockInAt || ''} 
+                                        onChange={(e) => setEditForm(prev => prev ? {...prev, clockInAt: e.target.value} : null)}
+                                        className="px-2 py-1 border rounded text-sm w-24"
+                                      />
+                                    ) : fmt(tc.clockInAt)}
+                                  </td>
+                                  <td className="p-2 border-b text-center">
+                                    {isEditing ? (
+                                      <input 
+                                        type="time" 
+                                        value={editForm?.clockOutAt || ''} 
+                                        onChange={(e) => setEditForm(prev => prev ? {...prev, clockOutAt: e.target.value} : null)}
+                                        className="px-2 py-1 border rounded text-sm w-24"
+                                      />
+                                    ) : fmt(tc.clockOutAt)}
+                                  </td>
+                                  <td className="p-2 border-b text-center">{bd.breakMin}</td>
+                                  <td className="p-2 border-b text-center">{bd.totalMin}</td>
+                                  <td className="p-2 border-b text-center">{bd.nightMin}</td>
+                                  <td className="p-2 border-b text-center">{bd.overtimeMin}</td>
+                                  <td className="p-2 border-b text-center">¥{tc.hourlyWage ?? orgSettings?.defaultHourlyWage ?? 1100}</td>
+                                  <td className="p-2 border-b text-center">¥{Math.round(bd.transport).toLocaleString('ja-JP')}</td>
+                                  <td className="p-2 border-b text-center font-semibold">¥{bd.total.toLocaleString('ja-JP')}</td>
+                                  <td className="p-2 border-b text-center">
+                                    {isEditing ? (
+                                      <div className="flex gap-1 justify-center">
+                                        <button
+                                          onClick={saveEdit}
+                                          className="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                                        >
+                                          保存
+                                        </button>
+                                        <button
+                                          onClick={cancelEdit}
+                                          className="px-2 py-1 bg-gray-300 rounded text-xs hover:bg-gray-400"
+                                        >
+                                          取消
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        onClick={() => startEdit(tc)}
+                                        className="px-2 py-1 bg-gray-200 rounded text-xs hover:bg-gray-300"
+                                      >
+                                        編集
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
-    </ToastProvider>
+    </div>
   );
 }
