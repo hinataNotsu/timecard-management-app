@@ -5,8 +5,13 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { collection, query, where, getDocs, doc, updateDoc, deleteDoc, Timestamp, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Timecard } from '@/types';
-import { useToast, ToastProvider } from '@/components/Toast';
+import { useToast } from '@/components/Toast';
+
+// 休憩期間の型定義
+interface BreakPeriod {
+  startAt: Timestamp;
+  endAt?: Timestamp;
+}
 
 interface TimecardRow {
   id: string;
@@ -17,14 +22,33 @@ interface TimecardRow {
   date: Timestamp;
   clockIn?: Timestamp;
   clockOut?: Timestamp;
-  breakTime: number; // minutes
+  breaks: BreakPeriod[];  // 複数休憩対応
+  breakTime: number; // 合計休憩時間（分）- 表示用
   hourlyWage: number;
   status: 'in_progress' | 'completed';
-  approvalStatus?: 'draft' | 'pending' | 'approved' | 'rejected'; // 承認ステータス
+  approvalStatus?: 'draft' | 'pending' | 'approved' | 'rejected';
   totalHours?: number;
   totalPay?: number;
   isEditing?: boolean;
 }
+
+// ドロップダウンメニュー位置
+interface MenuPosition {
+  top: number;
+  left: number;
+}
+
+// 休憩時間合計を計算するヘルパー関数
+const calcTotalBreakMinutes = (breaks: BreakPeriod[]): number => {
+  if (!breaks || breaks.length === 0) return 0;
+  let total = 0;
+  for (const b of breaks) {
+    if (b.startAt && b.endAt) {
+      total += Math.max(0, Math.floor((b.endAt.toMillis() - b.startAt.toMillis()) / 60000));
+    }
+  }
+  return total;
+};
 
 export default function TimecardsPage() {
   const { userProfile, loading } = useAuth();
@@ -39,6 +63,9 @@ export default function TimecardsPage() {
   
   // ドロップダウンメニュー状態
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  
+  // 休憩詳細モーダル
+  const [breakDetailCardId, setBreakDetailCardId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && (!userProfile || !userProfile.isManage)) {
@@ -80,9 +107,11 @@ export default function TimecardsPage() {
 
         const data: TimecardRow[] = raw.map((r: any) => {
           const dateTs = Timestamp.fromDate(new Date(`${r.dateKey}T00:00:00`));
-          const breakMinutes = (r.breakStartAt && r.breakEndAt)
-            ? Math.max(0, Math.floor((r.breakEndAt.toMillis() - r.breakStartAt.toMillis()) / 60000))
-            : 0;
+          
+          // 複数休憩対応: breaks配列から合計時間を計算
+          const breaks: BreakPeriod[] = r.breaks || [];
+          const breakMinutes = calcTotalBreakMinutes(breaks);
+          
           const status: 'in_progress' | 'completed' = r.clockOutAt ? 'completed' : 'in_progress';
           return {
             id: r.id,
@@ -93,10 +122,11 @@ export default function TimecardsPage() {
             date: dateTs,
             clockIn: r.clockInAt,
             clockOut: r.clockOutAt,
+            breaks,
             breakTime: breakMinutes,
             hourlyWage: Number(r.hourlyWage ?? 0),
             status,
-            approvalStatus: r.status || 'draft', // Firestoreのstatusフィールド
+            approvalStatus: r.status || 'draft',
           };
         });
 
@@ -110,17 +140,6 @@ export default function TimecardsPage() {
 
     fetchTimecards();
   }, [userProfile]);
-
-  const formatDateTime = (timestamp: Timestamp) => {
-    const date = timestamp.toDate();
-    return date.toLocaleString('ja-JP', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
 
   const formatDate = (timestamp: Timestamp) => {
     const date = timestamp.toDate();
@@ -158,14 +177,13 @@ export default function TimecardsPage() {
     setSaving(id);
     try {
       const updateData: any = {
-        breakTime: timecard.breakTime,
         hourlyWage: timecard.hourlyWage,
         updatedAt: Timestamp.now(),
       };
 
       // 出勤・退勤時刻の更新
-      if (timecard.clockIn) updateData.clockIn = timecard.clockIn;
-      if (timecard.clockOut) updateData.clockOut = timecard.clockOut;
+      if (timecard.clockIn) updateData.clockInAt = timecard.clockIn;
+      if (timecard.clockOut) updateData.clockOutAt = timecard.clockOut;
 
       // 総労働時間と給与を再計算
       if (timecard.clockOut && timecard.clockIn) {
@@ -216,11 +234,6 @@ export default function TimecardsPage() {
     }
   };
 
-  const parseDateTime = (dateStr: string, timeStr: string): Timestamp => {
-    const combined = `${dateStr}T${timeStr}:00`;
-    return Timestamp.fromDate(new Date(combined));
-  };
-
   if (loading || loadingData) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -240,6 +253,9 @@ export default function TimecardsPage() {
     if (endDate && tcDate > endDate) return false;
     return true;
   });
+
+  // 休憩詳細モーダル用のデータ
+  const breakDetailCard = breakDetailCardId ? timecards.find(tc => tc.id === breakDetailCardId) : null;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -349,16 +365,16 @@ export default function TimecardsPage() {
                       )}
                     </td>
                     <td className="p-3 border-b text-center">
-                      {tc.isEditing ? (
-                        <input
-                          type="number"
-                          min={0}
-                          value={tc.breakTime}
-                          onChange={(e) => updateField(tc.id, 'breakTime', Number(e.target.value))}
-                          className="w-20 px-2 py-1 border rounded text-center"
-                        />
+                      {tc.breaks.length > 0 ? (
+                        <button
+                          onClick={() => setBreakDetailCardId(tc.id)}
+                          className="text-blue-600 hover:underline"
+                          title="休憩詳細を表示"
+                        >
+                          {tc.breakTime}分 ({tc.breaks.length}回)
+                        </button>
                       ) : (
-                        tc.breakTime
+                        <span className="text-gray-400">-</span>
                       )}
                     </td>
                     <td className="p-3 border-b text-center">
@@ -400,11 +416,11 @@ export default function TimecardsPage() {
                               disabled={saving === tc.id}
                               className={`px-2 py-1 rounded text-xs ${
                                 saving === tc.id
-                                  ? 'bg-gray-300 text-gray-500'
+                                  ? 'bg-gray-200 text-gray-500'
                                   : 'bg-blue-600 text-white hover:bg-blue-700'
                               }`}
                             >
-                              {saving === tc.id ? '保存中' : '保存'}
+                              {saving === tc.id ? '保存中...' : '保存'}
                             </button>
                             <button
                               onClick={() => toggleEdit(tc.id)}
@@ -414,39 +430,25 @@ export default function TimecardsPage() {
                             </button>
                           </>
                         ) : (
-                          <div className="relative">
+                          <>
                             <button
-                              onClick={() => setOpenMenuId(openMenuId === tc.id ? null : tc.id)}
-                              className="px-2 py-1 text-gray-600 hover:bg-gray-100 rounded"
+                              onClick={() => toggleEdit(tc.id)}
+                              className="px-2 py-1 rounded text-xs bg-gray-200 text-gray-700 hover:bg-gray-300"
                             >
-                              ⋮
+                              編集
                             </button>
-                            {openMenuId === tc.id && (
-                              <>
-                                <div className="fixed inset-0 z-40" onClick={() => setOpenMenuId(null)} />
-                                <div className="absolute right-0 mt-1 w-24 bg-white border rounded-lg shadow-lg z-50">
-                                  <button
-                                    onClick={() => {
-                                      setOpenMenuId(null);
-                                      toggleEdit(tc.id);
-                                    }}
-                                    className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 rounded-t-lg"
-                                  >
-                                    編集
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setOpenMenuId(null);
-                                      deleteTimecard(tc.id, tc.userName);
-                                    }}
-                                    className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-gray-100 rounded-b-lg"
-                                  >
-                                    削除
-                                  </button>
-                                </div>
-                              </>
-                            )}
-                          </div>
+                            <button
+                              onClick={() => deleteTimecard(tc.id, tc.userName)}
+                              disabled={deleting === tc.id}
+                              className={`px-2 py-1 rounded text-xs ${
+                                deleting === tc.id
+                                  ? 'bg-gray-200 text-gray-500'
+                                  : 'bg-red-600 text-white hover:bg-red-700'
+                              }`}
+                            >
+                              {deleting === tc.id ? '削除中...' : '削除'}
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
@@ -456,14 +458,70 @@ export default function TimecardsPage() {
             </tbody>
           </table>
         </div>
-
-        <div className="mt-4 text-sm text-gray-600">
-          <p>※ 編集ボタンで出勤・退勤時刻、休憩時間、時給を変更できます</p>
-          <p>※ 退勤時刻を変更すると労働時間と給与が自動で再計算されます</p>
-        </div>
       </div>
 
-      {/* ConfirmModalは不要。トーストでconfirmを表示 */}
+      {/* 休憩詳細モーダル */}
+      {breakDetailCard && (
+        <div 
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setBreakDetailCardId(null)}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-xl max-w-md w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b flex items-center justify-between">
+              <h3 className="text-lg font-bold">休憩詳細</h3>
+              <button
+                onClick={() => setBreakDetailCardId(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6">
+              <div className="mb-4">
+                <p className="text-sm text-gray-600">
+                  {breakDetailCard.userName} - {formatDate(breakDetailCard.date)}
+                </p>
+              </div>
+              
+              {breakDetailCard.breaks.length === 0 ? (
+                <p className="text-gray-500 text-center py-4">休憩記録がありません</p>
+              ) : (
+                <div className="space-y-3">
+                  {breakDetailCard.breaks.map((b, idx) => {
+                    const startTime = b.startAt ? formatTime(b.startAt) : '--:--';
+                    const endTime = b.endAt ? formatTime(b.endAt) : '休憩中...';
+                    const duration = b.startAt && b.endAt 
+                      ? Math.floor((b.endAt.toMillis() - b.startAt.toMillis()) / 60000)
+                      : null;
+                    
+                    return (
+                      <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-medium text-gray-500">#{idx + 1}</span>
+                          <span className="text-sm">
+                            {startTime} → {endTime}
+                          </span>
+                        </div>
+                        <span className={`text-sm font-medium ${duration !== null ? 'text-gray-900' : 'text-yellow-600'}`}>
+                          {duration !== null ? `${duration}分` : '進行中'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  
+                  <div className="pt-3 border-t flex items-center justify-between">
+                    <span className="font-medium">合計</span>
+                    <span className="font-bold text-blue-600">{breakDetailCard.breakTime}分</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
