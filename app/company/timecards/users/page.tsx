@@ -25,12 +25,14 @@ export default function TimecardsUsersPage() {
   const [displayCount, setDisplayCount] = useState(20);
   const [isWatchAdmin, setIsWatchAdmin] = useState<boolean | null>(null);
 
+  const orgId = userProfile?.currentOrganizationId;
+
   // 組織設定のisWatchAdminをチェック
   useEffect(() => {
+    if (!orgId) return;
     const checkOrgSettings = async () => {
-      if (!userProfile?.currentOrganizationId) return;
       try {
-        const orgDoc = await getDoc(doc(db, 'organizations', userProfile.currentOrganizationId));
+        const orgDoc = await getDoc(doc(db, 'organizations', orgId));
         if (orgDoc.exists()) {
           const orgData = orgDoc.data();
           const watchAdmin = orgData.isWatchAdmin !== false; // デフォルトtrue
@@ -41,10 +43,13 @@ export default function TimecardsUsersPage() {
       }
     };
     checkOrgSettings();
-  }, [userProfile?.currentOrganizationId]);
+  }, [orgId]);
 
+  // アクセス制御
   useEffect(() => {
-    if (!loading && (!userProfile || !userProfile.isManage)) {
+    if (loading) return; // 認証ロード中は何もしない
+    
+    if (!userProfile || !userProfile.isManage) {
       router.push('/staff/dashboard');
       return;
     }
@@ -54,16 +59,18 @@ export default function TimecardsUsersPage() {
     }
   }, [userProfile, loading, isWatchAdmin, router]);
 
+  // ユーザー一覧を取得
   useEffect(() => {
+    // 認証ロード中、または組織IDがない場合はスキップ
+    if (loading || !orgId) return;
+    
     const fetchUsers = async () => {
-      if (!userProfile?.currentOrganizationId) return;
-      
       setLoadingData(true);
       try {
         // organizationIdsに現在の組織IDを含むユーザーを取得
         const q = query(
           collection(db, 'users'),
-          where('organizationIds', 'array-contains', userProfile.currentOrganizationId)
+          where('organizationIds', 'array-contains', orgId)
         );
         const snapshot = await getDocs(q);
 
@@ -92,14 +99,14 @@ export default function TimecardsUsersPage() {
     };
 
     fetchUsers();
-  }, [userProfile]);
+  }, [loading, orgId]); // loading と orgId に依存
 
   // 検索フィルタリング
   const filteredUsers = useMemo(() => {
     if (!searchQuery.trim()) return users;
-    const query = searchQuery.toLowerCase().trim();
+    const q = searchQuery.toLowerCase().trim();
     return users.filter(user => 
-      user.displayName.toLowerCase().includes(query)
+      user.displayName.toLowerCase().includes(q)
     );
   }, [users, searchQuery]);
 

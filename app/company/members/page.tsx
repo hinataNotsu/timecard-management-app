@@ -1,10 +1,10 @@
 "use client";
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { collection, doc, getDoc, getDocs, query, updateDoc, where, setDoc, deleteDoc, Timestamp, arrayRemove, arrayUnion } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { useToast, ToastProvider } from '@/components/Toast';
+import { useToast } from '@/components/Toast';
 
 interface MemberRow {
   uid: string;
@@ -23,16 +23,16 @@ interface Request {
   createdAt?: any;
 }
 
+// ドロップダウンメニュー位置
+interface MenuPosition {
+  top: number;
+  left: number;
+}
+
 export default function OrganizationMembersPage() {
-    // タブ管理
-    const [activeTab, setActiveTab] = useState<'members' | 'requests'>('members');
-    
-    // 新規ユーザー追加用のstate（関数コンポーネント内に移動）
-    const [newUserEmail, setNewUserEmail] = useState('');
-    const [newUserPassword, setNewUserPassword] = useState('');
-    const [newUserDisplayName, setNewUserDisplayName] = useState('');
-    const [adding, setAdding] = useState(false);
-    const [showAddUser, setShowAddUser] = useState(false);
+  // タブ管理
+  const [activeTab, setActiveTab] = useState<'members' | 'requests'>('members');
+  
   const { userProfile } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -46,10 +46,9 @@ export default function OrganizationMembersPage() {
   // モーダル状態管理
   const { showSuccessToast, showErrorToast, showConfirmToast } = useToast();
   
-  // ドロップダウンメニュー状態
+  // ドロップダウンメニュー状態（位置情報付き）
   const [openMenuUid, setOpenMenuUid] = useState<string | null>(null);
-  
-  // ...existing code...
+  const [menuPosition, setMenuPosition] = useState<MenuPosition>({ top: 0, left: 0 });
 
   const orgId = userProfile?.currentOrganizationId;
 
@@ -111,19 +110,25 @@ export default function OrganizationMembersPage() {
           }
         }
 
-        const list: MemberRow[] = usnap.docs.map((d) => {
-          const u = d.data() as any;
-          const settings = settingsMap.get(d.id);
-          return {
-            uid: u.uid || d.id,
-            displayName: u.displayName || d.id,
-            email: u.email || '',
-            avatarSeed: u.avatarSeed || u.displayName || d.id,
-            avatarBgColor: u.avatarBackgroundColor,
-            transportAllowancePerShift: settings?.transport,
-            hourlyWage: settings?.wage,
-          };
-        }).sort((a, b) => (a.displayName || a.email).localeCompare(b.displayName || b.email));
+        // 退職済み（deleted: true）のユーザーを除外
+        const list: MemberRow[] = usnap.docs
+          .filter((d) => {
+            const u = d.data() as any;
+            return !u.deleted;
+          })
+          .map((d) => {
+            const u = d.data() as any;
+            const settings = settingsMap.get(d.id);
+            return {
+              uid: u.uid || d.id,
+              displayName: u.displayName || d.id,
+              email: u.email || '',
+              avatarSeed: u.avatarSeed || u.displayName || d.id,
+              avatarBgColor: u.avatarBackgroundColor,
+              transportAllowancePerShift: settings?.transport,
+              hourlyWage: settings?.wage,
+            };
+          }).sort((a, b) => (a.displayName || a.email).localeCompare(b.displayName || b.email));
 
         setRows(list);
       } catch (e) {
@@ -145,7 +150,6 @@ export default function OrganizationMembersPage() {
         const orgDoc = await getDoc(orgDocRef);
         const orgData = orgDoc.exists() ? orgDoc.data() : {};
         const permissionList = Array.isArray(orgData.permissionList) ? orgData.permissionList : [];
-        console.log('[Requests] Loaded permissionList:', permissionList);
         setRequests(permissionList);
       } catch (e) {
         console.error('[Requests] load error', e);
@@ -156,117 +160,32 @@ export default function OrganizationMembersPage() {
     fetchRequests();
   }, [orgId]);
 
+  // 退職処理
   const markAsRetired = async (uid: string, displayName: string) => {
-    if (!orgId) return;
-    const confirmed = await showConfirmToast(
-      `${displayName} をこの組織で退職済みにしますか？\n\n※ この組織でのアクセスができなくなります\n※ 他の組織には影響しません\n※ 過去のシフトやタイムカードは記録として残ります`,
-      {
-        title: 'メンバー退職',
-        confirmText: '退職にする',
-        cancelText: 'キャンセル',
-      }
-    );
+    const confirmed = await showConfirmToast(`${displayName}さんを退職処理しますか？\n\nこの操作は取り消せません。`, {
+      title: '退職処理',
+      confirmText: '退職処理',
+      cancelText: 'キャンセル',
+    });
     if (!confirmed) return;
+    
+    if (!orgId) return;
     setRemoving(uid);
     try {
-      // ユーザーのorganizationIdsからこの組織のIDを削除
-      const userRef = doc(db, 'users', uid);
-      await updateDoc(userRef, {
-        organizationIds: arrayRemove(orgId),
+      // ユーザードキュメントにdeleted: trueを設定
+      await updateDoc(doc(db, 'users', uid), {
+        deleted: true,
+        deletedAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
       });
-      // UIから削除
-      setRows(prev => prev.filter(r => r.uid !== uid));
+      // ローカル状態からも削除
+      setRows((prev) => prev.filter((r) => r.uid !== uid));
       showSuccessToast('退職処理が完了しました');
-    } catch (e: any) {
+    } catch (e) {
       console.error('[Members] retire error', e);
       showErrorToast('退職処理に失敗しました');
     } finally {
       setRemoving(null);
-    }
-  };
-
-
-
-  const handleAddUser = async () => {
-    if (!orgId || !userProfile?.uid) return;
-    
-    if (!newUserEmail || !newUserPassword) {
-      alert('メールアドレスとパスワードを入力してください');
-      return;
-    }
-    
-    if (newUserPassword.length < 6) {
-      alert('パスワードは6文字以上で入力してください');
-      return;
-    }
-    
-    setAdding(true);
-    try {
-      // API経由でユーザー作成（Admin SDKを使用）
-      const response = await fetch('/api/admin/create-user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: newUserEmail,
-          password: newUserPassword,
-          displayName: newUserDisplayName || newUserEmail.split('@')[0],
-          organizationId: orgId,
-          createdByUid: userProfile.uid,
-        }),
-      });
-
-      const result = await response.json();
-      
-      if (!response.ok) {
-        // Firebase Admin SDK未設定の場合のエラー処理
-        if (result.error?.includes('Firebase Admin SDK')) {
-          throw new Error('ユーザー作成機能を使用するには、Firebase Admin SDKの設定が必要です。\n\n開発環境では、.env.localに以下を設定してください:\n- FIREBASE_CLIENT_EMAIL\n- FIREBASE_PRIVATE_KEY');
-        }
-        const errorMsg = result.error || 'ユーザーの作成に失敗しました';
-        const details = result.details ? `\n\n詳細: ${result.details}` : '';
-        throw new Error(errorMsg + details);
-      }
-
-      showSuccessToast(`ユーザーを作成しました\n\nメール: ${result.email}\n初回ログイン後にパスワード変更を促します。`);
-      // フォームをリセット
-      setNewUserEmail('');
-      setNewUserPassword('');
-      setNewUserDisplayName('');
-      setShowAddUser(false);
-      // メンバー再取得
-      if (orgId) {
-        const uq = query(collection(db, 'users'), where('organizationIds', 'array-contains', orgId));
-        const usnap = await getDocs(uq);
-        const memberSnap = await getDocs(collection(db, 'organizations', orgId, 'members'));
-        const settingsMap = new Map<string, { transport?: number; wage?: number }>();
-        memberSnap.forEach((d) => {
-          const data = d.data() as any;
-          settingsMap.set(d.id, {
-            transport: typeof data.transportAllowancePerShift === 'number' ? data.transportAllowancePerShift : undefined,
-            wage: typeof data.hourlyWage === 'number' ? data.hourlyWage : undefined,
-          });
-        });
-        const list: MemberRow[] = usnap.docs.map((d) => {
-          const u = d.data() as any;
-          const settings = settingsMap.get(d.id);
-          return {
-            uid: u.uid || d.id,
-            displayName: u.displayName || d.id,
-            email: u.email || '',
-            avatarSeed: u.avatarSeed || u.displayName || d.id,
-            avatarBgColor: u.avatarBackgroundColor,
-            transportAllowancePerShift: settings?.transport,
-            hourlyWage: settings?.wage,
-          };
-        }).sort((a, b) => (a.displayName || a.email).localeCompare(b.displayName || b.email));
-        setRows(list);
-      }
-    } catch (e: any) {
-      console.error('[Members] add user error', e);
-      showErrorToast(e.message || 'ユーザーの作成に失敗しました');
-    } finally {
-      setAdding(false);
     }
   };
 
@@ -318,6 +237,31 @@ export default function OrganizationMembersPage() {
     const base = `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(seed)}`;
     const params = bgColor ? `&backgroundColor=${encodeURIComponent(bgColor)}` : '&backgroundType=gradientLinear';
     return `${base}${params}&fontWeight=700&radius=50`;
+  };
+
+  // メニューを開く（位置計算付き）
+  const handleOpenMenu = (uid: string, event: React.MouseEvent<HTMLButtonElement>) => {
+    if (openMenuUid === uid) {
+      setOpenMenuUid(null);
+      return;
+    }
+    
+    const button = event.currentTarget;
+    const rect = button.getBoundingClientRect();
+    
+    // ビューポートの高さを取得
+    const viewportHeight = window.innerHeight;
+    const menuHeight = 100; // メニューの概算高さ
+    
+    // 下に十分なスペースがあるかチェック
+    const spaceBelow = viewportHeight - rect.bottom;
+    const showAbove = spaceBelow < menuHeight && rect.top > menuHeight;
+    
+    setMenuPosition({
+      top: showAbove ? rect.top - menuHeight : rect.bottom + 4,
+      left: rect.right - 128, // メニュー幅 w-32 = 128px
+    });
+    setOpenMenuUid(uid);
   };
 
   return (
@@ -374,61 +318,36 @@ export default function OrganizationMembersPage() {
                       <th className="p-2 border-b text-center">操作</th>
                     </tr>
                   </thead>
-                <tbody>
+                  <tbody>
                     {loading ? (
                       <tr><td className="p-4 text-center" colSpan={6}>読み込み中...</td></tr>
                     ) : rows.length === 0 ? (
                       <tr><td className="p-4 text-center" colSpan={6}>在籍メンバーがいません</td></tr>
                     ) : (
                       rows.map((r) => (
-                      <tr key={r.uid} className="hover:bg-gray-50">
-                        <td className="p-2 border-b w-12">
-                          <img src={avatarUrl(r.avatarSeed || r.displayName || r.uid, r.avatarBgColor)} alt={r.displayName} className="w-8 h-8 rounded-full ring-1 ring-gray-200" />
-                        </td>
-                        <td className="p-2 border-b">{r.displayName}</td>
-                        <td className="p-2 border-b">{r.email}</td>
-                        <td className="p-2 border-b text-center">
-                          {r.hourlyWage ? `¥${r.hourlyWage.toLocaleString()}` : '-'}
-                        </td>
-                        <td className="p-2 border-b text-center">
-                          {r.transportAllowancePerShift ? `¥${r.transportAllowancePerShift.toLocaleString()}` : '-'}
-                        </td>
-                        <td className="p-2 border-b text-center relative">
-                          <button
-                            onClick={() => setOpenMenuUid(openMenuUid === r.uid ? null : r.uid)}
-                            className="px-2 py-1 text-gray-600 hover:bg-gray-100 rounded"
-                          >
-                            ⋮
-                          </button>
-                          {openMenuUid === r.uid && (
-                            <>
-                              <div className="fixed inset-0 z-10" onClick={() => setOpenMenuUid(null)} />
-                              <div className="absolute right-0 mt-1 w-32 bg-white border rounded-lg shadow-lg z-20">
-                                <button
-                                  onClick={() => {
-                                    setOpenMenuUid(null);
-                                    router.push(`/company/members/${r.uid}/edit`);
-                                  }}
-                                  className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 rounded-t-lg"
-                                >
-                                  編集
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setOpenMenuUid(null);
-                                    markAsRetired(r.uid, r.displayName);
-                                  }}
-                                  className="w-full px-4 py-2 text-left text-sm text-amber-600 hover:bg-gray-100 rounded-b-lg"
-                                >
-                                  退職処理
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                        <tr key={r.uid} className="hover:bg-gray-50">
+                          <td className="p-2 border-b w-12">
+                            <img src={avatarUrl(r.avatarSeed || r.displayName || r.uid, r.avatarBgColor)} alt={r.displayName} className="w-8 h-8 rounded-full ring-1 ring-gray-200" />
+                          </td>
+                          <td className="p-2 border-b">{r.displayName}</td>
+                          <td className="p-2 border-b">{r.email}</td>
+                          <td className="p-2 border-b text-center">
+                            {r.hourlyWage ? `¥${r.hourlyWage.toLocaleString()}` : '-'}
+                          </td>
+                          <td className="p-2 border-b text-center">
+                            {r.transportAllowancePerShift ? `¥${r.transportAllowancePerShift.toLocaleString()}` : '-'}
+                          </td>
+                          <td className="p-2 border-b text-center">
+                            <button
+                              onClick={(e) => handleOpenMenu(r.uid, e)}
+                              className="px-2 py-1 text-gray-600 hover:bg-gray-100 rounded"
+                            >
+                              ⋮
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -476,7 +395,42 @@ export default function OrganizationMembersPage() {
         )}
       </div>
 
-      {/* ConfirmModalは不要。トーストでconfirmを表示 */}
+      {/* ドロップダウンメニュー（position: fixed で表示） */}
+      {openMenuUid && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpenMenuUid(null)} />
+          <div 
+            className="fixed w-32 bg-white border rounded-lg shadow-lg z-50"
+            style={{
+              top: `${menuPosition.top}px`,
+              left: `${menuPosition.left}px`,
+            }}
+          >
+            <button
+              onClick={() => {
+                const uid = openMenuUid;
+                setOpenMenuUid(null);
+                router.push(`/company/members/${uid}/edit`);
+              }}
+              className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 rounded-t-lg"
+            >
+              編集
+            </button>
+            <button
+              onClick={() => {
+                const member = rows.find(r => r.uid === openMenuUid);
+                if (member) {
+                  setOpenMenuUid(null);
+                  markAsRetired(member.uid, member.displayName);
+                }
+              }}
+              className="w-full px-4 py-2 text-left text-sm text-amber-600 hover:bg-gray-100 rounded-b-lg"
+            >
+              退職処理
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
