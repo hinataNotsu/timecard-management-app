@@ -917,10 +917,10 @@ export default function ShiftSubmitPage() {
     return (
       <div className="bg-white rounded-lg shadow overflow-x-auto" style={{ WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none' }}>
         <div className="grid grid-cols-8 min-w-max">
-          <div className="sticky left-0 bg-gray-50 border-r border-gray-300 border-opacity-50 z-10">
+          <div className="sticky left-0 bg-gray-50 border-r border-gray-300 border-opacity-50 z-10 w-14">
             <div className="h-12 border-b border-gray-300 border-opacity-50"></div>
             {hours.map(hour => (
-              <div key={hour} className="h-12 px-2 pt-1 text-sm text-gray-600 border-b border-gray-300 border-opacity-50 flex items-start">
+              <div key={hour} className="h-12 px-1 pt-1 text-xs text-gray-600 border-b border-gray-300 border-opacity-50 flex items-start justify-center">
                 {hour}
               </div>
             ))}
@@ -935,8 +935,8 @@ export default function ShiftSubmitPage() {
             const holidayName = holiday ? JapaneseHolidays.getHolidaysOf(day.getFullYear(), day.getMonth() + 1, day.getDate())[0]?.name : null;
 
             return (
-              <div key={dayIndex} className="border-r border-gray-300 border-opacity-50 last:border-r-0 min-w-32" style={{ WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none' }}>
-                <div className={`h-12 p-2 border-b border-gray-300 border-opacity-50 text-center ${isToday ? 'bg-blue-50 font-bold' : 'bg-gray-50'}`}>
+              <div key={dayIndex} className="border-r border-gray-300 border-opacity-50 last:border-r-0 min-w-20" style={{ WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none' }}>
+                <div className={`h-12 p-1 border-b border-gray-300 border-opacity-50 text-center ${isToday ? 'bg-blue-50 font-bold' : 'bg-gray-50'}`}>
                   <div className={`text-xs ${
                     holiday || dayOfWeek === 0 ? 'text-red-600' : dayOfWeek === 6 ? 'text-blue-600' : 'text-gray-600'
                   }`}>
@@ -983,8 +983,7 @@ export default function ShiftSubmitPage() {
                         }
                         if (!isLongPressActive || !isDragging || !dragStartInfo) return;
                         
-                        // 長押しドラッグ中はスクロールを防止
-                        e.preventDefault();
+                        e.preventDefault(); // 長押しドラッグ中のみスクロール防止
                         
                         const touch = e.touches[0];
                         const deltaY = touch.clientY - dragStartInfo.startY;
@@ -1178,8 +1177,7 @@ export default function ShiftSubmitPage() {
                     }
                     if (!isLongPressActive || !isDragging || !dragStartInfo) return;
                     
-                    // 長押しドラッグ中はスクロールを防止
-                    e.preventDefault();
+                    e.preventDefault(); // 長押しドラッグ中のみスクロール防止
                     
                     const touch = e.touches[0];
                     const deltaY = touch.clientY - dragStartInfo.startY;
