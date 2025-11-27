@@ -160,7 +160,7 @@ export const ShiftModal = memo(function ShiftModal({
     >
       <div 
         ref={sheetRef}
-        className={`bg-white rounded-t-xl sm:rounded-lg px-2 py-4 sm:p-6 w-[95%] max-w-md sm:max-w-md max-h-[90vh] overflow-y-auto ${isDragging ? '' : 'transition-transform duration-300 ease-out'} ${isVisible && dragY === 0 ? 'translate-y-0 sm:scale-100 sm:opacity-100' : !isVisible ? 'translate-y-full sm:translate-y-0 sm:scale-95 sm:opacity-0' : ''}`}
+        className={`bg-white rounded-t-2xl sm:rounded-lg w-full sm:w-[500px] max-h-[85vh] overflow-y-auto ${isDragging ? '' : 'transition-transform duration-300 ease-out'} ${isVisible && dragY === 0 ? 'translate-y-0 sm:scale-100 sm:opacity-100' : !isVisible ? 'translate-y-full sm:translate-y-0 sm:scale-95 sm:opacity-0' : ''}`}
         style={{ 
           transform: dragY > 0 ? `translateY(${dragY}px)` : undefined,
         }}
@@ -170,88 +170,93 @@ export const ShiftModal = memo(function ShiftModal({
         onTouchEnd={handleTouchEnd}
       >
         {/* ドラッグハンドル（スマホ用） */}
-        <div className="sm:hidden flex justify-center mb-2 py-1 cursor-grab">
-          <div className="w-10 h-1 bg-gray-300 rounded-full"></div>
+        <div className="sm:hidden flex justify-center pt-3 pb-2 cursor-grab">
+          <div className="w-12 h-1.5 bg-gray-300 rounded-full"></div>
         </div>
 
-        <div style={{ paddingLeft: '8px', paddingRight: '8px' }}>
-          <h3 className="text-lg font-semibold mb-3 sm:mb-4">
-            {editingId ? 'シフト編集' : 'シフト追加'}
-          </h3>
-
-          <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">日付</label>
-            <input
-              type="date"
-              value={shift.date}
-              onChange={(e) => setShift({ ...shift, date: e.target.value })}
-              className="border rounded-md px-2 py-3 sm:w-full sm:px-3 sm:py-2 text-sm sm:text-base"
-            />
-          </div>
-
-          <div className="flex gap-3 sm:gap-4">
-            <div className="sm:flex-1">
-              <label className="block text-sm font-medium text-gray-700 mb-1">開始時刻</label>
-              <input
-                type="time"
-                value={shift.startTime}
-                onChange={(e) => setShift({ ...shift, startTime: e.target.value })}
-                className="border rounded-md px-1 py-3 sm:w-full sm:px-3 sm:py-2 text-sm sm:text-base"
-              />
-            </div>
-            <div className="sm:flex-1">
-              <label className="block text-sm font-medium text-gray-700 mb-1">終了時刻</label>
-              <input
-                type="time"
-                value={shift.endTime}
-                onChange={(e) => setShift({ ...shift, endTime: e.target.value })}
-                className="border rounded-md px-1 py-3 sm:w-full sm:px-3 sm:py-2 text-sm sm:text-base"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">備考</label>
-            <textarea
-              value={shift.note || ''}
-              onChange={(e) => setShift({ ...shift, note: e.target.value })}
-              className="w-full border rounded-md px-2 py-2 sm:px-3 text-sm sm:text-base"
-              rows={3}
-            />
-          </div>
-          </div>
-        </div>
-
-        <div className="flex justify-between mt-6 pb-4 sm:pb-0" style={{ paddingLeft: '8px', paddingRight: '8px' }}>
-          <div>
+        <div className="px-5 sm:px-6 pb-6 sm:py-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">
+              {editingId ? 'シフト編集' : 'シフト追加'}
+            </h3>
             {editingId && (
               <button
                 onClick={() => {
                   handleClose();
                   onDelete(editingId);
                 }}
-                className="px-4 py-3 sm:py-2 text-red-600 hover:text-red-800"
+                className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                aria-label="削除"
               >
-                削除
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
               </button>
             )}
           </div>
-          <div className="flex gap-2">
+
+          <div className="space-y-4 sm:space-y-3">
+            {/* PC: 日付と時間を1行に */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">日付</label>
+                <input
+                  type="date"
+                  value={shift.date}
+                  onChange={(e) => setShift({ ...shift, date: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-3 sm:py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">開始時刻</label>
+                <input
+                  type="time"
+                  value={shift.startTime}
+                  onChange={(e) => setShift({ ...shift, startTime: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-3 sm:py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">終了時刻</label>
+                <input
+                  type="time"
+                  value={shift.endTime}
+                  onChange={(e) => setShift({ ...shift, endTime: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-3 sm:py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">備考</label>
+              <textarea
+                value={shift.note || ''}
+                onChange={(e) => setShift({ ...shift, note: e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                rows={2}
+                placeholder="任意で入力"
+              />
+            </div>
+          </div>
+
+          {/* ボタン */}
+          <div className="mt-6 flex gap-2 sm:justify-end">
             <button
               onClick={handleClose}
-              className="px-4 py-3 sm:py-2 border rounded-md hover:bg-gray-50"
+              className="flex-1 sm:flex-none px-4 py-3 sm:py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
               キャンセル
             </button>
             <button
               onClick={handleSubmit}
-              className="px-4 py-3 sm:py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+              className="flex-1 sm:flex-none px-6 py-3 sm:py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
             >
               {editingId ? '更新' : '追加'}
             </button>
           </div>
         </div>
+        
+        {/* Safe area padding for iPhone */}
+        <div className="h-safe sm:hidden"></div>
       </div>
     </div>
   );
