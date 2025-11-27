@@ -65,6 +65,7 @@ export default function PayrollPage() {
   const [memberTransport, setMemberTransport] = useState<Record<string, number>>({});
   const [monthlyReports, setMonthlyReports] = useState<Record<string, any>>({});
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set()); // 折りたたまれた日付
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{
     clockInAt: string;
@@ -197,8 +198,8 @@ export default function PayrollPage() {
           const tMap: Record<string, number> = {};
           memSnap.docs.forEach((d) => {
             const data = d.data() as any;
-            if (data.transportAllowance !== undefined) {
-              tMap[d.id] = Number(data.transportAllowance);
+            if (data.transportAllowancePerShift !== undefined) {
+              tMap[d.id] = Number(data.transportAllowancePerShift);
             }
           });
           setMemberTransport(tMap);
@@ -310,9 +311,8 @@ export default function PayrollPage() {
     );
     const holiday = isHol ? hourly * (totalMin / 60) * (orgSettings?.holidayPremiumRate ?? 0) : 0;
     
-    const transport = orgSettings?.transportAllowanceEnabled
-      ? (memberTransport[tc.userId] ?? orgSettings.transportAllowancePerShift ?? 0)
-      : 0;
+    // 交通費は1日1回のみ支給するため、ここでは計算しない（applicationsで日数ベースで計算）
+    const transport = 0;
     
     const total = Math.round(base + night + overtime + holiday + transport);
     
@@ -328,7 +328,7 @@ export default function PayrollPage() {
 
   // ユーザーごとに集計
   const applications = useMemo(() => {
-    const map = new Map<string, UserApplication>();
+    const map = new Map<string, UserApplication & { uniqueDates: Set<string> }>();
     
     for (const tc of timecards) {
       const userId = tc.userId;
@@ -353,12 +353,13 @@ export default function PayrollPage() {
           holiday: 0,
           transport: 0,
           total: 0,
+          uniqueDates: new Set<string>(),
         });
       }
       
       const app = map.get(userId)!;
       app.timecards.push(tc);
-      app.workDays++;
+      app.uniqueDates.add(tc.dateKey); // 日付をユニークに記録
       
       const bd = calcBreakdown(tc);
       app.totalMinutes += bd.totalMin;
@@ -369,11 +370,28 @@ export default function PayrollPage() {
       app.night += bd.night;
       app.overtime += bd.overtime;
       app.holiday += bd.holiday;
-      app.transport += bd.transport;
-      app.total += bd.total;
     }
     
-    return Array.from(map.values()).sort((a, b) => a.userName.localeCompare(b.userName));
+    // 交通費を日数ベースで計算し、合計を更新
+    const result: UserApplication[] = [];
+    for (const [userId, app] of map) {
+      app.workDays = app.uniqueDates.size; // ユニークな日数
+      
+      // 交通費 = 出勤日数 × 1日あたりの交通費
+      const transportPerDay = orgSettings?.transportAllowanceEnabled
+        ? (memberTransport[userId] ?? orgSettings.transportAllowancePerShift ?? 0)
+        : 0;
+      app.transport = app.workDays * transportPerDay;
+      
+      // 合計を再計算
+      app.total = Math.round(app.base + app.night + app.overtime + app.holiday + app.transport);
+      
+      // uniqueDatesは返さない
+      const { uniqueDates, ...userApp } = app;
+      result.push(userApp);
+    }
+    
+    return result.sort((a, b) => a.userName.localeCompare(b.userName));
   }, [timecards, orgSettings, memberTransport, userInfoMap]);
 
   // 承認処理
@@ -437,7 +455,7 @@ export default function PayrollPage() {
     }
   };
 
-  // 月次レポート保存
+  // 月次レポート保存（追加承認の場合は差分を加算）
   const saveMonthlyReport = async (userId: string) => {
     if (!userProfile?.currentOrganizationId) return;
     
@@ -455,73 +473,66 @@ export default function PayrollPage() {
     const existingData = existingReportSnap.exists() ? existingReportSnap.data() : null;
     const version = existingData ? (existingData.version || 0) + 1 : 1;
     
-    const reportData = {
-      organizationId: userProfile.currentOrganizationId,
-      userId,
-      userName: userApp.userName,
-      year: y,
-      month: m,
-      workDays: userApp.workDays,
-      totalWorkMinutes: userApp.totalMinutes,
-      totalBreakMinutes: userApp.breakMinutes,
-      totalNightMinutes: userApp.nightMinutes,
-      totalOvertimeMinutes: userApp.overtimeMinutes,
-      baseWage: Math.round(userApp.base),
-      nightPremium: Math.round(userApp.night),
-      overtimePremium: Math.round(userApp.overtime),
-      holidayPremium: Math.round(userApp.holiday),
-      transportAllowance: Math.round(userApp.transport),
-      totalAmount: userApp.total,
-      timecardCount: userApp.timecards.length,
-      status: 'confirmed',
-      version,
-      approvedAt: Timestamp.now(),
-      approvedBy: userProfile.uid,
-      createdAt: existingData?.createdAt || Timestamp.now(),
-      updatedAt: Timestamp.now(),
-    };
+    let reportData;
+    
+    if (existingData) {
+      // 追加承認: 既存データに差分を加算
+      reportData = {
+        organizationId: userProfile.currentOrganizationId,
+        userId,
+        userName: userApp.userName,
+        year: y,
+        month: m,
+        workDays: existingData.workDays + userApp.workDays,
+        totalWorkMinutes: existingData.totalWorkMinutes + userApp.totalMinutes,
+        totalBreakMinutes: existingData.totalBreakMinutes + userApp.breakMinutes,
+        totalNightMinutes: existingData.totalNightMinutes + userApp.nightMinutes,
+        totalOvertimeMinutes: existingData.totalOvertimeMinutes + userApp.overtimeMinutes,
+        baseWage: existingData.baseWage + Math.round(userApp.base),
+        nightPremium: existingData.nightPremium + Math.round(userApp.night),
+        overtimePremium: existingData.overtimePremium + Math.round(userApp.overtime),
+        holidayPremium: existingData.holidayPremium + Math.round(userApp.holiday),
+        transportAllowance: existingData.transportAllowance + Math.round(userApp.transport),
+        totalAmount: existingData.totalAmount + userApp.total,
+        timecardCount: existingData.timecardCount + userApp.timecards.length,
+        status: 'confirmed',
+        version,
+        approvedAt: Timestamp.now(),
+        approvedBy: userProfile.uid,
+        createdAt: existingData.createdAt,
+        updatedAt: Timestamp.now(),
+      };
+    } else {
+      // 初回承認: 新規作成
+      reportData = {
+        organizationId: userProfile.currentOrganizationId,
+        userId,
+        userName: userApp.userName,
+        year: y,
+        month: m,
+        workDays: userApp.workDays,
+        totalWorkMinutes: userApp.totalMinutes,
+        totalBreakMinutes: userApp.breakMinutes,
+        totalNightMinutes: userApp.nightMinutes,
+        totalOvertimeMinutes: userApp.overtimeMinutes,
+        baseWage: Math.round(userApp.base),
+        nightPremium: Math.round(userApp.night),
+        overtimePremium: Math.round(userApp.overtime),
+        holidayPremium: Math.round(userApp.holiday),
+        transportAllowance: Math.round(userApp.transport),
+        totalAmount: userApp.total,
+        timecardCount: userApp.timecards.length,
+        status: 'confirmed',
+        version,
+        approvedAt: Timestamp.now(),
+        approvedBy: userProfile.uid,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      };
+    }
     
     await setDoc(doc(db, 'monthlyReports', reportId), reportData);
     setMonthlyReports(prev => ({ ...prev, [userId]: { id: reportId, ...reportData } }));
-  };
-
-  // 差し戻し
-  const handleRevert = async (userId: string) => {
-    const reason = window.prompt('差し戻し理由を入力してください（任意）');
-    if (reason === null) return;
-    
-    try {
-      const report = monthlyReports[userId];
-      if (!report?.id) {
-        showErrorToast('月次レポートが見つかりません');
-        return;
-      }
-      const reportId = report.id;
-      
-      await updateDoc(doc(db, 'monthlyReports', reportId), {
-        status: 'reverted',
-        revertedAt: Timestamp.now(),
-        revertedBy: userProfile?.uid,
-        revertReason: reason || '',
-        updatedAt: Timestamp.now(),
-      });
-      
-      const userTimecards = timecards.filter(tc => tc.userId === userId && tc.status === 'approved');
-      const now = Timestamp.now();
-      const updatedIds: string[] = [];
-      for (const tc of userTimecards) {
-        await updateDoc(doc(db, 'timecards', tc.id), {
-          status: 'pending',
-          updatedAt: now,
-        });
-        updatedIds.push(tc.id);
-      }
-      setTimecards(prev => prev.map(tc => updatedIds.includes(tc.id) ? { ...tc, status: 'pending', updatedAt: now } : tc));
-      showSuccessToast(`差し戻しが完了しました（${userTimecards.length}件のタイムカードを未承認に戻しました）`);
-    } catch (e) {
-      console.error('[Payroll] revert error', e);
-      showErrorToast('差し戻しに失敗しました');
-    }
   };
 
   // 編集開始
@@ -615,13 +626,21 @@ export default function PayrollPage() {
             {applications.map((app) => {
               const report = monthlyReports[app.userId];
               const isConfirmed = report?.status === 'confirmed';
+              const isAdditional = isConfirmed; // 既に承認済みの場合は追加承認
               
               return (
                 <div key={app.userId} className="bg-white rounded-lg shadow overflow-hidden">
                   {/* ユーザーヘッダー */}
                   <div 
                     className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50"
-                    onClick={() => setSelectedUserId(selectedUserId === app.userId ? null : app.userId)}
+                    onClick={() => {
+                      if (selectedUserId === app.userId) {
+                        setSelectedUserId(null);
+                      } else {
+                        setSelectedUserId(app.userId);
+                        setCollapsedDates(new Set()); // 展開時は全日付を展開状態に
+                      }
+                    }}
                   >
                     <div className="flex items-center gap-4">
                       <img src={app.avatarUrl} alt="" className="w-10 h-10 rounded-full" />
@@ -636,29 +655,21 @@ export default function PayrollPage() {
                       <div className="text-right">
                         <div className="text-lg font-bold text-blue-600">¥{app.total.toLocaleString()}</div>
                         <div className="text-xs text-gray-500">
-                          {isConfirmed ? (
-                            <span className="text-green-600">承認済み</span>
+                          {isAdditional ? (
+                            <span className="text-blue-600">追加申請</span>
                           ) : (
                             <span className="text-yellow-600">申請中</span>
                           )}
                         </div>
                       </div>
-                      {!isConfirmed && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleApprove(app.userId); }}
-                          className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-                        >
-                          承認
-                        </button>
-                      )}
-                      {isConfirmed && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleRevert(app.userId); }}
-                          className="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600"
-                        >
-                          差し戻し
-                        </button>
-                      )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleApprove(app.userId); }}
+                        className={`px-4 py-2 text-white rounded hover:opacity-90 ${
+                          isAdditional ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'
+                        }`}
+                      >
+                        {isAdditional ? '追加承認' : '承認'}
+                      </button>
                       <span className="text-gray-400">{selectedUserId === app.userId ? '▲' : '▼'}</span>
                     </div>
                   </div>
@@ -666,7 +677,7 @@ export default function PayrollPage() {
                   {/* 詳細テーブル */}
                   {selectedUserId === app.userId && selectedApp && (
                     <div className="border-t">
-                      <div className="p-4 bg-gray-50 grid grid-cols-4 gap-4 text-sm">
+                      <div className="p-4 bg-gray-50 grid grid-cols-5 gap-4 text-sm">
                         <div>
                           <span className="text-gray-500">基本給:</span>
                           <span className="ml-2 font-semibold">¥{Math.round(app.base).toLocaleString()}</span>
@@ -683,91 +694,162 @@ export default function PayrollPage() {
                           <span className="text-gray-500">休日:</span>
                           <span className="ml-2 font-semibold">¥{Math.round(app.holiday).toLocaleString()}</span>
                         </div>
+                        <div>
+                          <span className="text-gray-500">交通費:</span>
+                          <span className="ml-2 font-semibold">¥{Math.round(app.transport).toLocaleString()}</span>
+                        </div>
                       </div>
           
-                      <div className="p-6">
-                        <table className="w-full text-sm">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="p-2 border-b text-center">日付</th>
-                              <th className="p-2 border-b text-center">出勤</th>
-                              <th className="p-2 border-b text-center">退勤</th>
-                              <th className="p-2 border-b text-center">休憩(分)</th>
-                              <th className="p-2 border-b text-center">勤務(分)</th>
-                              <th className="p-2 border-b text-center">深夜(分)</th>
-                              <th className="p-2 border-b text-center">残業(分)</th>
-                              <th className="p-2 border-b text-center">時給</th>
-                              <th className="p-2 border-b text-center">交通費(円)</th>
-                              <th className="p-2 border-b text-center">合計(円)</th>
-                              <th className="p-2 border-b text-center">操作</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {selectedApp.timecards.map((tc) => {
-                              const bd = calcBreakdown(tc);
-                              const fmt = (ts?: Timestamp) => ts ? ts.toDate().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '--:--';
-                              const isEditing = editingCardId === tc.id;
-                              
-                              return (
-                                <tr key={tc.id} className="hover:bg-gray-50">
-                                  <td className="p-2 border-b text-center">{tc.dateKey}</td>
-                                  <td className="p-2 border-b text-center">
-                                    {isEditing ? (
-                                      <input 
-                                        type="time" 
-                                        value={editForm?.clockInAt || ''} 
-                                        onChange={(e) => setEditForm(prev => prev ? {...prev, clockInAt: e.target.value} : null)}
-                                        className="px-2 py-1 border rounded text-sm w-24"
-                                      />
-                                    ) : fmt(tc.clockInAt)}
-                                  </td>
-                                  <td className="p-2 border-b text-center">
-                                    {isEditing ? (
-                                      <input 
-                                        type="time" 
-                                        value={editForm?.clockOutAt || ''} 
-                                        onChange={(e) => setEditForm(prev => prev ? {...prev, clockOutAt: e.target.value} : null)}
-                                        className="px-2 py-1 border rounded text-sm w-24"
-                                      />
-                                    ) : fmt(tc.clockOutAt)}
-                                  </td>
-                                  <td className="p-2 border-b text-center">{bd.breakMin}</td>
-                                  <td className="p-2 border-b text-center">{bd.totalMin}</td>
-                                  <td className="p-2 border-b text-center">{bd.nightMin}</td>
-                                  <td className="p-2 border-b text-center">{bd.overtimeMin}</td>
-                                  <td className="p-2 border-b text-center">¥{tc.hourlyWage ?? orgSettings?.defaultHourlyWage ?? 1100}</td>
-                                  <td className="p-2 border-b text-center">¥{Math.round(bd.transport).toLocaleString('ja-JP')}</td>
-                                  <td className="p-2 border-b text-center font-semibold">¥{bd.total.toLocaleString('ja-JP')}</td>
-                                  <td className="p-2 border-b text-center">
-                                    {isEditing ? (
-                                      <div className="flex gap-1 justify-center">
-                                        <button
-                                          onClick={saveEdit}
-                                          className="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
-                                        >
-                                          保存
-                                        </button>
-                                        <button
-                                          onClick={cancelEdit}
-                                          className="px-2 py-1 bg-gray-300 rounded text-xs hover:bg-gray-400"
-                                        >
-                                          取消
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <button
-                                        onClick={() => startEdit(tc)}
-                                        className="px-2 py-1 bg-gray-200 rounded text-xs hover:bg-gray-300"
-                                      >
-                                        編集
-                                      </button>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                      <div className="p-6 space-y-4">
+                        {(() => {
+                          // 日付ごとにグループ化
+                          const groupedByDate = new Map<string, typeof selectedApp.timecards>();
+                          for (const tc of selectedApp.timecards) {
+                            if (!groupedByDate.has(tc.dateKey)) {
+                              groupedByDate.set(tc.dateKey, []);
+                            }
+                            groupedByDate.get(tc.dateKey)!.push(tc);
+                          }
+                          
+                          // 日付でソート
+                          const sortedDates = Array.from(groupedByDate.keys()).sort();
+                          
+                          // 曜日を取得する関数
+                          const getWeekday = (dateKey: string) => {
+                            const [y, m, d] = dateKey.split('-').map(Number);
+                            const date = new Date(y, m - 1, d);
+                            const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+                            return weekdays[date.getDay()];
+                          };
+                          
+                          // 交通費を取得
+                          const transportPerDay = orgSettings?.transportAllowanceEnabled
+                            ? (memberTransport[app.userId] ?? orgSettings.transportAllowancePerShift ?? 0)
+                            : 0;
+                          
+                          return sortedDates.map((dateKey) => {
+                            const dayTimecards = groupedByDate.get(dateKey)!;
+                            const isCollapsed = collapsedDates.has(dateKey);
+                            const weekday = getWeekday(dateKey);
+                            
+                            return (
+                              <div key={dateKey} className="border rounded-lg overflow-hidden">
+                                {/* 日付ヘッダー */}
+                                <div 
+                                  className="px-4 py-2 bg-blue-50 flex items-center justify-between cursor-pointer hover:bg-blue-100"
+                                  onClick={() => {
+                                    setCollapsedDates(prev => {
+                                      const next = new Set(prev);
+                                      if (next.has(dateKey)) {
+                                        next.delete(dateKey);
+                                      } else {
+                                        next.add(dateKey);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <span className="font-semibold text-blue-800">
+                                      📅 {dateKey}（{weekday}）
+                                    </span>
+                                    <span className="text-sm text-blue-600">
+                                      {dayTimecards.length}件
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-sm font-medium text-green-700">
+                                      交通費: ¥{transportPerDay.toLocaleString()}
+                                    </span>
+                                    <span className="text-gray-400">{isCollapsed ? '▼' : '▲'}</span>
+                                  </div>
+                                </div>
+                                
+                                {/* タイムカードテーブル */}
+                                {!isCollapsed && (
+                                  <table className="w-full text-sm">
+                                    <thead className="bg-gray-50">
+                                      <tr>
+                                        <th className="p-2 border-b text-center">出勤</th>
+                                        <th className="p-2 border-b text-center">退勤</th>
+                                        <th className="p-2 border-b text-center">休憩(分)</th>
+                                        <th className="p-2 border-b text-center">勤務(分)</th>
+                                        <th className="p-2 border-b text-center">深夜(分)</th>
+                                        <th className="p-2 border-b text-center">残業(分)</th>
+                                        <th className="p-2 border-b text-center">時給</th>
+                                        <th className="p-2 border-b text-center">合計(円)</th>
+                                        <th className="p-2 border-b text-center">操作</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {dayTimecards.map((tc) => {
+                                        const bd = calcBreakdown(tc);
+                                        const fmt = (ts?: Timestamp) => ts ? ts.toDate().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '--:--';
+                                        const isEditing = editingCardId === tc.id;
+                                        
+                                        return (
+                                          <tr key={tc.id} className="hover:bg-gray-50">
+                                            <td className="p-2 border-b text-center">
+                                              {isEditing ? (
+                                                <input 
+                                                  type="time" 
+                                                  value={editForm?.clockInAt || ''} 
+                                                  onChange={(e) => setEditForm(prev => prev ? {...prev, clockInAt: e.target.value} : null)}
+                                                  className="px-2 py-1 border rounded text-sm w-24"
+                                                />
+                                              ) : fmt(tc.clockInAt)}
+                                            </td>
+                                            <td className="p-2 border-b text-center">
+                                              {isEditing ? (
+                                                <input 
+                                                  type="time" 
+                                                  value={editForm?.clockOutAt || ''} 
+                                                  onChange={(e) => setEditForm(prev => prev ? {...prev, clockOutAt: e.target.value} : null)}
+                                                  className="px-2 py-1 border rounded text-sm w-24"
+                                                />
+                                              ) : fmt(tc.clockOutAt)}
+                                            </td>
+                                            <td className="p-2 border-b text-center">{bd.breakMin}</td>
+                                            <td className="p-2 border-b text-center">{bd.totalMin}</td>
+                                            <td className="p-2 border-b text-center">{bd.nightMin}</td>
+                                            <td className="p-2 border-b text-center">{bd.overtimeMin}</td>
+                                            <td className="p-2 border-b text-center">¥{tc.hourlyWage ?? orgSettings?.defaultHourlyWage ?? 1100}</td>
+                                            <td className="p-2 border-b text-center font-semibold">¥{bd.total.toLocaleString('ja-JP')}</td>
+                                            <td className="p-2 border-b text-center">
+                                              {isEditing ? (
+                                                <div className="flex gap-1 justify-center">
+                                                  <button
+                                                    onClick={saveEdit}
+                                                    className="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                                                  >
+                                                    保存
+                                                  </button>
+                                                  <button
+                                                    onClick={cancelEdit}
+                                                    className="px-2 py-1 bg-gray-300 rounded text-xs hover:bg-gray-400"
+                                                  >
+                                                    取消
+                                                  </button>
+                                                </div>
+                                              ) : (
+                                                <button
+                                                  onClick={() => startEdit(tc)}
+                                                  className="px-2 py-1 bg-gray-200 rounded text-xs hover:bg-gray-300"
+                                                >
+                                                  編集
+                                                </button>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                )}
+                              </div>
+                            );
+                          });
+                        })()}
                       </div>
                     </div>
                   )}

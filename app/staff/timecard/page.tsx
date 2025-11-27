@@ -37,6 +37,9 @@ export default function TimecardPage() {
   const [record, setRecord] = useState<TimecardRecord | null>(null);
   const [now, setNow] = useState<Date | null>(null);
   const [isWatchAdmin, setIsWatchAdmin] = useState<boolean | null>(null);
+  const [todayCount, setTodayCount] = useState(0); // 今日の打刻回数
+
+  const MAX_DAILY_RECORDS = 5; // 1日の出退勤回数上限
 
   // live clock
   useEffect(() => {
@@ -85,33 +88,58 @@ export default function TimecardPage() {
         where('dateKey', '==', dateKey)
       );
       const snap = await getDocs(q);
-      if (!snap.empty) {
-        const d = snap.docs[0];
+      const docs = snap.docs.map(d => {
         const data = d.data();
-        setRecord({
+        return {
           id: d.id,
           dateKey: data.dateKey,
           organizationId: data.organizationId,
           userId: data.userId,
           clockInAt: data.clockInAt,
-          breaks: data.breaks || [], // 配列がない場合は空配列
+          breaks: data.breaks || [],
           clockOutAt: data.clockOutAt,
           hourlyWage: data.hourlyWage,
           status: data.status || 'draft',
           createdAt: data.createdAt,
           updatedAt: data.updatedAt
-        });
+        } as TimecardRecord;
+      });
+      
+      setTodayCount(docs.length);
+      
+      // 未完了のタイムカード（clockOutAtがない）を探す
+      const incomplete = docs.find(d => !d.clockOutAt);
+      if (incomplete) {
+        // 未完了があればそれを使う
+        setRecord(incomplete);
+      } else if (docs.length > 0 && docs.length < MAX_DAILY_RECORDS) {
+        // 全て完了済みで5件未満なら新規出勤可能（record=null）
+        setRecord(null);
+      } else if (docs.length >= MAX_DAILY_RECORDS) {
+        // 5件以上なら最新を表示（出勤不可）
+        const sorted = docs.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
+        setRecord(sorted[0]);
       }
+      // docs.length === 0 の場合は record=null のまま
+      
       setLoading(false);
     };
     load();
   }, [userProfile?.currentOrganizationId, userProfile?.uid]);
 
   const ensureRecord = async (): Promise<TimecardRecord> => {
-    if (record) return record;
+    // 既存の未完了レコードがあればそれを返す
+    if (record && !record.clockOutAt) return record;
+    
     if (!userProfile?.currentOrganizationId || !userProfile?.uid) {
       throw new Error('ログインが必要です');
     }
+    
+    // 5件制限チェック
+    if (todayCount >= MAX_DAILY_RECORDS) {
+      throw new Error(`本日は既に${MAX_DAILY_RECORDS}回出退勤しています。これ以上打刻できません。`);
+    }
+    
     const dateKey = new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-');
     
     // 時給を取得
@@ -162,6 +190,7 @@ export default function TimecardPage() {
     };
     await setDoc(ref, base);
     setRecord(base);
+    setTodayCount(prev => prev + 1); // カウントを増やす
     return base;
   };
 
@@ -256,7 +285,12 @@ export default function TimecardPage() {
   };
 
   // ボタン有効/無効の判定
-  const canClockIn = useMemo(() => !record?.clockInAt, [record]);
+  const canClockIn = useMemo(() => {
+    // 5件以上なら出勤不可
+    if (todayCount >= MAX_DAILY_RECORDS) return false;
+    // recordがない、または退勤済みなら出勤可能
+    return !record || !!record.clockOutAt;
+  }, [record, todayCount]);
   
   const canBreakStart = useMemo(() => {
     if (!record?.clockInAt || record?.clockOutAt) return false;
