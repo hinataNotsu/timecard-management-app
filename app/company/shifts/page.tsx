@@ -68,6 +68,13 @@ export default function AdminShiftListPage() {
   const [editingLabelColor, setEditingLabelColor] = useState('#8b5cf6');
   const [showBulkApprovalConfirm, setShowBulkApprovalConfirm] = useState(false);
   const [bulkApproving, setBulkApproving] = useState(false);
+  const [showTimeSettings, setShowTimeSettings] = useState(false);
+  const [timeRangeStart, setTimeRangeStart] = useState(0);
+  const [timeRangeEnd, setTimeRangeEnd] = useState(24);
+  const [tempTimeStart, setTempTimeStart] = useState(0);
+  const [tempTimeEnd, setTempTimeEnd] = useState(24);
+  const [userOrder, setUserOrder] = useState<string[]>([]);
+  const [draggedUserId, setDraggedUserId] = useState<string | null>(null);
   
   const availableColors = [
     { name: '紫', value: '#8b5cf6' },
@@ -93,9 +100,11 @@ export default function AdminShiftListPage() {
       try {
         // 組織設定の取得
         try {
+          console.log('[Debug] 組織設定を読み込み中...', userProfile.currentOrganizationId);
           const orgSnap = await getDoc(doc(db, 'organizations', userProfile.currentOrganizationId));
           if (orgSnap.exists()) {
             const o = orgSnap.data() as any;
+            console.log('[Debug] 組織設定データ:', o);
             setOrgSettings({
               defaultHourlyWage: Number(o.defaultHourlyWage ?? 1100),
               nightPremiumEnabled: !!o.nightPremiumEnabled,
@@ -103,6 +112,19 @@ export default function AdminShiftListPage() {
               nightStart: o.nightStart ?? '22:00',
               nightEnd: o.nightEnd ?? '05:00',
             });
+            // 時間範囲設定を読み込む
+            console.log('[Debug] 時間範囲設定:', o.shiftTimeRangeStart, '-', o.shiftTimeRangeEnd);
+            setTimeRangeStart(o.shiftTimeRangeStart ?? 0);
+            setTimeRangeEnd(o.shiftTimeRangeEnd ?? 24);
+            setTempTimeStart(o.shiftTimeRangeStart ?? 0);
+            setTempTimeEnd(o.shiftTimeRangeEnd ?? 24);
+            // ユーザー順序を読み込む
+            if (o.shiftUserOrder && Array.isArray(o.shiftUserOrder)) {
+              console.log('[Debug] ユーザー順序を読み込みました:', o.shiftUserOrder);
+              setUserOrder(o.shiftUserOrder);
+            } else {
+              console.log('[Debug] 保存されたユーザー順序がありません');
+            }
             // ラベルを読み込む
             if (o.shiftLabels && Array.isArray(o.shiftLabels)) {
               console.log('[Admin List] ラベルを読み込みました:', o.shiftLabels);
@@ -150,32 +172,34 @@ export default function AdminShiftListPage() {
         } catch (e) {
           console.warn('[Admin List] failed to load org members', e);
         }
-        // 月全件読み込みは負荷が大きいため、テーブル表示時のみ月ロードする
+        // 月範囲でのサーバーサイド絞り込み
+        const y = selectedMonth.getFullYear();
+        const m = selectedMonth.getMonth();
+        const monthStart = new Date(y, m, 1, 0, 0, 0, 0);
+        const nextMonthStart = new Date(y, m + 1, 1, 0, 0, 0, 0);
+        console.log('[Debug] 月シフト読み込み:', { viewMode, monthStart, nextMonthStart });
+        const q = query(
+          collection(db, 'shifts'),
+          where('organizationId', '==', userProfile.currentOrganizationId),
+          where('date', '>=', Timestamp.fromDate(monthStart)),
+          where('date', '<', Timestamp.fromDate(nextMonthStart)),
+          orderBy('date', 'asc')
+        );
+        let snap;
+        try {
+          snap = await getDocs(q);
+          console.log('[Debug] 月シフトクエリ結果:', snap.docs.length, '件');
+        } catch (err) {
+          console.error('[Debug] shifts query failed:', {
+            currentOrganizationId: userProfile.currentOrganizationId,
+            monthStart,
+            nextMonthStart,
+            error: err,
+          });
+          throw err;
+        }
+        
         if (viewMode === 'table') {
-          // 月範囲でのサーバーサイド絞り込み
-          const y = selectedMonth.getFullYear();
-          const m = selectedMonth.getMonth();
-          const monthStart = new Date(y, m, 1, 0, 0, 0, 0);
-          const nextMonthStart = new Date(y, m + 1, 1, 0, 0, 0, 0);
-          const q = query(
-            collection(db, 'shifts'),
-            where('organizationId', '==', userProfile.currentOrganizationId),
-            where('date', '>=', Timestamp.fromDate(monthStart)),
-            where('date', '<', Timestamp.fromDate(nextMonthStart)),
-            orderBy('date', 'asc')
-          );
-          let snap;
-          try {
-            snap = await getDocs(q);
-          } catch (err) {
-            console.error('[Debug] shifts query failed:', {
-              currentOrganizationId: userProfile.currentOrganizationId,
-              monthStart,
-              nextMonthStart,
-              error: err,
-            });
-            throw err;
-          }
 
           // userRef→ユーザー情報（displayName, avatarSeed）をキャッシュ取得
           const userCache = new Map<string, { name: string; seed: string; bgColor?: string }>();
@@ -216,8 +240,17 @@ export default function AdminShiftListPage() {
           for (const d of snap.docs) {
             const data = d.data() as any;
             const dateTs: Timestamp = data.date;
-            const userRefPath: string = data.userRef?.path || '';
-            const userId = userRefPath.split('/').pop();
+            
+            // ユーザーIDの取得（複数のフィールド形式に対応）
+            let userId: string | undefined;
+            if (data.uid) {
+              userId = data.uid;
+            } else if (data.userId) {
+              userId = data.userId;
+            } else if (data.userRef?.path) {
+              userId = data.userRef.path.split('/').pop();
+            }
+            
             if (!userId) continue;
             const { name: userName, seed: avatarSeed, bgColor: avatarBgColor } = await getUserInfo(userId);
             
@@ -256,8 +289,52 @@ export default function AdminShiftListPage() {
 
           setShifts(rows);
         } else {
-          // 月ビューでは月全件は読み込まず、日クリックで遅延取得する
-          setShifts([]);
+          // カレンダービュー用に簡易版を作成（アイコン表示用）
+          const rows: ShiftRow[] = [];
+          for (const d of snap.docs) {
+            const data = d.data() as any;
+            const dateTs: Timestamp = data.date;
+            
+            // ユーザーIDの取得
+            let userId: string | undefined;
+            if (data.uid) {
+              userId = data.uid;
+            } else if (data.userId) {
+              userId = data.userId;
+            } else if (data.userRef?.path) {
+              userId = data.userRef.path.split('/').pop();
+            }
+            
+            if (!userId) continue;
+            
+            // カレンダー表示用に最小限の情報のみ取得
+            const cached = allOrgUsers.find(u => u.id === userId);
+            const userName = cached?.name || userId;
+            const avatarSeed = cached?.seed || userName;
+            const avatarBgColor = cached?.bgColor;
+            
+            rows.push({
+              id: d.id,
+              userId,
+              userName,
+              avatarSeed,
+              avatarBgColor,
+              date: dateTs.toDate(),
+              startTime: data.startTime,
+              endTime: data.endTime,
+              originalStartTime: data.originalStartTime || data.startTime,
+              originalEndTime: data.originalEndTime || data.endTime,
+              note: data.note || '',
+              labelId: data.labelId || null,
+              hourlyWage: data.hourlyWage != null ? Number(data.hourlyWage) : undefined,
+              status: (data.status as any) || 'pending',
+              approvedByName: null,
+              approvedAt: null,
+              rejectReason: data.rejectReason || null,
+            });
+          }
+          console.log('[Debug] カレンダー用シフト設定:', rows.length, '件');
+          setShifts(rows);
         }
       } catch (e) {
         console.error('[Debug] admin list load failed:', e);
@@ -267,6 +344,29 @@ export default function AdminShiftListPage() {
     };
     load();
   }, [userProfile?.currentOrganizationId, selectedMonth]);
+
+  // dayShiftsが更新されたらユーザー順序を初期化
+  useEffect(() => {
+    console.log('[Debug] dayShifts更新:', dayShifts.length, '件');
+    if (dayShifts.length === 0) return;
+    
+    const currentUserIds = Array.from(new Set(dayShifts.map(s => s.userId)));
+    console.log('[Debug] 現在のユーザーID:', currentUserIds);
+    console.log('[Debug] 既存の順序:', userOrder);
+    
+    // 既存の順序と現在のユーザーを統合
+    const existingIds = userOrder.filter(id => currentUserIds.includes(id));
+    const newIds = currentUserIds.filter(id => !userOrder.includes(id));
+    
+    console.log('[Debug] 保持するID:', existingIds);
+    console.log('[Debug] 新規ID:', newIds);
+    
+    if (newIds.length > 0 || existingIds.length !== userOrder.length) {
+      const newOrder = [...existingIds, ...newIds];
+      console.log('[Debug] ユーザー順序を更新:', newOrder);
+      setUserOrder(newOrder);
+    }
+  }, [dayShifts]);
 
   // 月範囲はクエリで絞っているため前処理不要
 
@@ -402,25 +502,49 @@ export default function AdminShiftListPage() {
   const fetchDayShifts = async (day: Date) => {
     if (!userProfile?.currentOrganizationId) return;
     setDayLoading(true);
+    console.log('[Debug] fetchDayShifts開始:', day);
     try {
       const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0, 0);
       const nextDay = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+      console.log('[Debug] クエリ条件:', {
+        organizationId: userProfile.currentOrganizationId,
+        dayStart,
+        nextDay,
+      });
       const q = query(
         collection(db, 'shifts'),
         where('organizationId', '==', userProfile.currentOrganizationId),
         where('date', '>=', Timestamp.fromDate(dayStart)),
         where('date', '<', Timestamp.fromDate(nextDay)),
+        orderBy('date', 'asc'),
         orderBy('startTime', 'asc')
       );
+      console.log('[Debug] クエリ実行中...');
       const snap = await getDocs(q);
+      console.log('[Debug] クエリ結果:', snap.docs.length, '件');
 
       const rows: ShiftRow[] = [];
       for (const d of snap.docs) {
         const data = d.data() as any;
+        console.log('[Debug] シフトドキュメント:', d.id, data);
         const dateTs: Timestamp = data.date;
-        const userRefPath: string = data.userRef?.path || '';
-        const userId = userRefPath.split('/').pop();
-        if (!userId) continue;
+        
+        // ユーザーIDの取得（複数のフィールド形式に対応）
+        let userId: string | undefined;
+        if (data.uid) {
+          userId = data.uid;
+        } else if (data.userId) {
+          userId = data.userId;
+        } else if (data.userRef?.path) {
+          userId = data.userRef.path.split('/').pop();
+        }
+        
+        if (!userId) {
+          console.log('[Debug] userIdが取得できませんでした。スキップします。');
+          continue;
+        }
+        
+        console.log('[Debug] 処理中のuserId:', userId);
         // まず組織メンバーキャッシュから探す
         const cached = allOrgUsers.find(u => u.id === userId);
         let userName = cached?.name || userId;
@@ -487,9 +611,10 @@ export default function AdminShiftListPage() {
         });
       }
 
+      console.log('[Debug] dayShifts設定:', rows.length, '件');
       setDayShifts(rows);
     } catch (e) {
-      console.error('failed to fetch day shifts', e);
+      console.error('[Debug] fetchDayShiftsエラー:', e);
       setDayShifts([]);
     } finally {
       setDayLoading(false);
@@ -552,6 +677,70 @@ export default function AdminShiftListPage() {
     }
   };
 
+  const saveTimeSettings = async () => {
+    if (!userProfile?.currentOrganizationId) return;
+    try {
+      await updateDoc(doc(db, 'organizations', userProfile.currentOrganizationId), {
+        shiftTimeRangeStart: tempTimeStart,
+        shiftTimeRangeEnd: tempTimeEnd,
+      });
+      setTimeRangeStart(tempTimeStart);
+      setTimeRangeEnd(tempTimeEnd);
+      setShowTimeSettings(false);
+      alert('時間設定を保存しました');
+    } catch (e) {
+      alert('保存に失敗しました');
+      console.error(e);
+    }
+  };
+
+  const handleDragStart = (userId: string) => {
+    setDraggedUserId(userId);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = async (targetUserId: string) => {
+    console.log('[Debug] ドロップ:', draggedUserId, '->', targetUserId);
+    if (!draggedUserId || draggedUserId === targetUserId || !userProfile?.currentOrganizationId) {
+      console.log('[Debug] ドロップをキャンセル');
+      setDraggedUserId(null);
+      return;
+    }
+
+    const newOrder = [...userOrder];
+    const draggedIndex = newOrder.indexOf(draggedUserId);
+    const targetIndex = newOrder.indexOf(targetUserId);
+    
+    console.log('[Debug] インデックス:', draggedIndex, targetIndex);
+    
+    if (draggedIndex === -1 || targetIndex === -1) {
+      console.log('[Debug] インデックスが見つかりません');
+      setDraggedUserId(null);
+      return;
+    }
+    
+    // 位置を交換
+    [newOrder[draggedIndex], newOrder[targetIndex]] = [newOrder[targetIndex], newOrder[draggedIndex]];
+    
+    console.log('[Debug] 新しい順序:', newOrder);
+    setUserOrder(newOrder);
+    setDraggedUserId(null);
+    
+    // Firestoreに保存
+    try {
+      console.log('[Debug] Firestoreに保存中...', userProfile.currentOrganizationId);
+      await updateDoc(doc(db, 'organizations', userProfile.currentOrganizationId), {
+        shiftUserOrder: newOrder,
+      });
+      console.log('[Debug] Firestoreに保存完了');
+    } catch (e) {
+      console.error('[Debug] 順序の保存に失敗:', e);
+    }
+  };
+
   const bulkApproveDay = async () => {
     if (!userProfile?.uid || !selectedDay) return;
     setBulkApproving(true);
@@ -600,12 +789,18 @@ export default function AdminShiftListPage() {
           <button onClick={() => router.push('/company/dashboard')} className="text-sm text-gray-600 hover:text-gray-900">← ダッシュボード</button>
         </div>
 
-        <div className="bg-white rounded-lg shadow p-4 mb-6 flex flex-wrap gap-3 items-center">
+        <div className="bg-white rounded-lg shadow p-4 mb-6 flex flex-wrap gap-3 items-center justify-between">
           <div className="flex items-center gap-2">
             <button onClick={prevMonth} className="px-2 py-1 border rounded">←</button>
             <div className="font-semibold">{selectedMonth.getFullYear()}年 {selectedMonth.getMonth() + 1}月</div>
             <button onClick={nextMonth} className="px-2 py-1 border rounded">→</button>
           </div>
+          <button
+            onClick={() => setShowTimeSettings(true)}
+            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-sm font-medium"
+          >
+            時間設定
+          </button>
         </div>
 
         <div className="bg-white rounded-lg shadow p-4">
@@ -678,7 +873,7 @@ export default function AdminShiftListPage() {
         {/* 選択日があれば時間軸表示（全ユーザー）- モーダル表示 */}
         {selectedDay && (
               <div className="fixed inset-0 bg-black/50 z-40 flex items-start justify-center pt-8 p-4" onClick={() => { setSelectedDay(null); setDayShifts([]); setEditedShifts(new Map()); }}>
-                <div className="bg-white rounded-lg shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                <div className="bg-white rounded-lg shadow-2xl w-full max-w-7xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
                   <div className="px-6 py-4 border-b flex items-center justify-between bg-gray-50">
                     <div className="font-semibold text-lg">{selectedDay.getFullYear()}年{selectedDay.getMonth() + 1}月{selectedDay.getDate()}日 のシフト（時間軸）</div>
                     <div className="flex items-center gap-2">
@@ -742,23 +937,24 @@ export default function AdminShiftListPage() {
                             <span>ラベル管理</span>
                           </button>
                         </div>
-                        <div className="min-w-[900px]">
+                        <div className="overflow-x-auto">
+                          <div style={{ minWidth: '1140px' }}>
                       {/* 時間目盛り */}
-                      <div className="flex items-center">
-                        <div className="w-40" />
-                        <div className="flex-1 relative">
-                          <div className="absolute left-0 right-0 top-0 h-6">
-                            <div className="flex h-6">
-                              {Array.from({ length: 24 }).map((_, hh) => (
-                                <div key={hh} className="flex-1 text-[11px] text-center border-l border-gray-100">{hh}:00</div>
-                              ))}
-                            </div>
+                      <div className="flex items-center mb-2" style={{ gap: '12px' }}>
+                        <div style={{ width: '160px', flexShrink: 0 }} />
+                        <div style={{ width: '900px', flexShrink: 0 }} className="relative">
+                          <div className="flex h-6">
+                            {Array.from({ length: timeRangeEnd - timeRangeStart }).map((_, i) => {
+                              const hh = timeRangeStart + i;
+                              return <div key={hh} className="flex-1 text-[11px] text-center border-l border-gray-100">{hh}:00</div>;
+                            })}
                           </div>
                         </div>
+                        <div style={{ width: '192px', flexShrink: 0 }} />
                       </div>
 
                       {/* ユーザー行（当日にシフト提出した人のみ表示） */}
-                      <div className="mt-8 space-y-4">
+                      <div className="space-y-4">
                         {(() => {
                           // ユニークなユーザー一覧を dayShifts から作成
                           const map = new Map<string, { id: string; name: string; seed?: string; bgColor?: string }>();
@@ -768,26 +964,49 @@ export default function AdminShiftListPage() {
                               map.set(s.userId, { id: s.userId, name: cached?.name || s.userName || s.userId, seed: cached?.seed || s.avatarSeed, bgColor: cached?.bgColor || s.avatarBgColor });
                             }
                           }
-                          const usersToShow = Array.from(map.values());
+                          let usersToShow = Array.from(map.values());
+                          
+                          // userOrderに基づいてソート
+                          if (userOrder.length > 0) {
+                            usersToShow = usersToShow.sort((a, b) => {
+                              const aIndex = userOrder.indexOf(a.id);
+                              const bIndex = userOrder.indexOf(b.id);
+                              if (aIndex === -1) return 1;
+                              if (bIndex === -1) return -1;
+                              return aIndex - bIndex;
+                            });
+                          }
+                          
                           if (usersToShow.length === 0) return <div className="text-sm text-gray-500">この日に提出されたシフトはありません</div>;
                           return usersToShow.map(user => {
                             const shiftsForUser = dayShifts.filter(s => s.userId === user.id);
                             // ユーザーの備考をまとめる（重複を排除）
                             const userNotes = Array.from(new Set(shiftsForUser.map(s => s.note).filter(n => n && n.trim() !== ''))).join(' / ');
                           return (
-                            <div key={user.id} className="flex items-start gap-3">
-                              <div className="w-40 pr-2 flex-shrink-0">
-                                <div className="flex items-center gap-2">
+                            <div 
+                              key={user.id} 
+                              className="flex items-start" 
+                              style={{ gap: '12px' }}
+                              onDragOver={handleDragOver}
+                              onDrop={() => handleDrop(user.id)}
+                            >
+                              <div 
+                                style={{ width: '160px', flexShrink: 0 }}
+                                draggable
+                                onDragStart={() => handleDragStart(user.id)}
+                                className="cursor-move"
+                              >
+                                <div className="flex items-center gap-2 select-none">
                                   <img src={avatarUrl(user.seed || user.name || user.id, user.bgColor)} alt={user.name} className="w-8 h-8 rounded-full ring-1 ring-gray-200" />
                                   <div className="text-sm">{user.name}</div>
                                 </div>
                               </div>
-                              <div className="flex-1 relative h-12 bg-white border rounded">
+                              <div style={{ width: '900px', flexShrink: 0 }} className="relative h-12 bg-white border rounded">
                                 {/* 背景の目盛り線 */}
                                 <div className="absolute inset-0">
                                   <div className="h-full flex">
-                                    {Array.from({ length: 24 }).map((_, i) => (
-                                      <div key={i} className="flex-1 border-l border-gray-100" />
+                                    {Array.from({ length: timeRangeEnd - timeRangeStart }).map((_, i) => (
+                                      <div key={timeRangeStart + i} className="flex-1 border-l border-gray-100" />
                                     ))}
                                   </div>
                                 </div>
@@ -816,9 +1035,17 @@ export default function AdminShiftListPage() {
                                       if (isNaN(startMin) || isNaN(endMin)) return null;
                                       if (endMin <= startMin) return null;
                                       
-                                      const leftPct = (startMin / 1440) * 100;
-                                      const widthPct = ((endMin - startMin) / 1440) * 100;
-                                      const minPct = (20 / Math.max(900, 900)) * 100;
+                                      // 時間範囲に基づいて位置を計算
+                                      const rangeMinutes = (timeRangeEnd - timeRangeStart) * 60;
+                                      const startOffset = startMin - (timeRangeStart * 60);
+                                      const endOffset = endMin - (timeRangeStart * 60);
+                                      
+                                      // 表示範囲外のシフトは表示しない
+                                      if (endOffset <= 0 || startOffset >= rangeMinutes) return null;
+                                      
+                                      const leftPct = Math.max(0, (startOffset / rangeMinutes) * 100);
+                                      const widthPct = Math.min(100 - leftPct, ((Math.min(endOffset, rangeMinutes) - Math.max(startOffset, 0)) / rangeMinutes) * 100);
+                                      const minPct = (20 / 900) * 100;
                                       const finalWidthPct = Math.max(widthPct, minPct);
                                       
                                       const handleDragStart = (e: React.MouseEvent, edge: 'start' | 'end') => {
@@ -927,9 +1154,9 @@ export default function AdminShiftListPage() {
                                         </div>
                                       );
                                     })}
-                                </div>
+                                  </div>
                               </div>
-                              <div className="w-48 flex-shrink-0">
+                              <div style={{ width: '192px', flexShrink: 0 }}>
                                 {userNotes ? (
                                   <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded border border-gray-200 h-12 overflow-y-auto">
                                     {userNotes}
@@ -945,6 +1172,7 @@ export default function AdminShiftListPage() {
                           });
                         })()}
                       </div>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -952,6 +1180,58 @@ export default function AdminShiftListPage() {
                 </div>
               </div>
             )}
+
+        {/* 時間設定モーダル */}
+        {showTimeSettings && (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setShowTimeSettings(false)}>
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-lg font-semibold mb-4">シフト表示時間の設定</h3>
+              <p className="text-sm text-gray-600 mb-4">
+                時間軸シフト表に表示する時間範囲を設定します。
+              </p>
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">開始時刻</label>
+                  <select
+                    value={tempTimeStart}
+                    onChange={(e) => setTempTimeStart(Number(e.target.value))}
+                    className="w-full border rounded-md px-3 py-2"
+                  >
+                    {Array.from({ length: 24 }).map((_, h) => (
+                      <option key={h} value={h}>{h}:00</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">終了時刻</label>
+                  <select
+                    value={tempTimeEnd}
+                    onChange={(e) => setTempTimeEnd(Number(e.target.value))}
+                    className="w-full border rounded-md px-3 py-2"
+                  >
+                    {Array.from({ length: 25 }).map((_, h) => (
+                      <option key={h} value={h} disabled={h <= tempTimeStart}>{h}:00</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setShowTimeSettings(false)}
+                  className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={saveTimeSettings}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-semibold"
+                >
+                  保存
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 一括承認確認モーダル */}
         {showBulkApprovalConfirm && (
