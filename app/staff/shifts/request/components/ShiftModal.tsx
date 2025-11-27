@@ -195,11 +195,11 @@ export const ShiftModal = memo(function ShiftModal({
             )}
           </div>
 
-          <div className="space-y-4 sm:space-y-3 w-full">
-            {/* スマホ: 縦並び、PC: 日付と時間を1行に */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 w-full">
-              <div className="col-span-2 sm:col-span-1">
-                <label className="block text-sm font-medium text-gray-700 mb-1">日付</label>
+          <div className="space-y-4 sm:space-y-3 w-full flex flex-col items-center sm:items-start">
+            {/* スマホ: 全て縦並び、PC: 日付と時間を1行に */}
+            <div className="flex flex-col sm:grid sm:grid-cols-3 gap-3 w-[80%] sm:w-full">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1 text-left">日付</label>
                 <input
                   type="date"
                   value={shift.date}
@@ -208,7 +208,7 @@ export const ShiftModal = memo(function ShiftModal({
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">開始時刻</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1 text-left">開始時刻</label>
                 <input
                   type="time"
                   value={shift.startTime}
@@ -217,7 +217,7 @@ export const ShiftModal = memo(function ShiftModal({
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">終了時刻</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1 text-left">終了時刻</label>
                 <input
                   type="time"
                   value={shift.endTime}
@@ -226,8 +226,8 @@ export const ShiftModal = memo(function ShiftModal({
                 />
               </div>
             </div>
-            <div className="w-full">
-              <label className="block text-sm font-medium text-gray-700 mb-1">備考</label>
+            <div className="w-[80%] sm:w-full">
+              <label className="block text-sm font-medium text-gray-700 mb-1 text-left">備考</label>
               <textarea
                 value={shift.note || ''}
                 onChange={(e) => setShift({ ...shift, note: e.target.value })}
