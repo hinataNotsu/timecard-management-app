@@ -155,12 +155,12 @@ export const ShiftModal = memo(function ShiftModal({
 
   return (
     <div 
-      className={`fixed inset-0 z-50 flex items-end sm:items-center justify-center transition-colors duration-300 ${isVisible ? 'bg-black/30' : 'bg-transparent'}`}
+      className={`fixed inset-0 z-50 flex items-end sm:items-center justify-center transition-colors duration-300 overflow-hidden ${isVisible ? 'bg-black/30' : 'bg-transparent'}`}
       onClick={handleClose}
     >
       <div 
         ref={sheetRef}
-        className={`bg-white rounded-t-2xl sm:rounded-lg w-full sm:w-[500px] max-h-[85vh] overflow-y-auto ${isDragging ? '' : 'transition-transform duration-300 ease-out'} ${isVisible && dragY === 0 ? 'translate-y-0 sm:scale-100 sm:opacity-100' : !isVisible ? 'translate-y-full sm:translate-y-0 sm:scale-95 sm:opacity-0' : ''}`}
+        className={`bg-white rounded-t-2xl sm:rounded-lg w-full sm:w-[500px] max-w-full max-h-[85vh] overflow-y-auto overflow-x-hidden ${isDragging ? '' : 'transition-transform duration-300 ease-out'} ${isVisible && dragY === 0 ? 'translate-y-0 sm:scale-100 sm:opacity-100' : !isVisible ? 'translate-y-full sm:translate-y-0 sm:scale-95 sm:opacity-0' : ''}`}
         style={{ 
           transform: dragY > 0 ? `translateY(${dragY}px)` : undefined,
         }}
@@ -195,16 +195,16 @@ export const ShiftModal = memo(function ShiftModal({
             )}
           </div>
 
-          <div className="space-y-4 sm:space-y-3">
-            {/* PC: 日付と時間を1行に */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
+          <div className="space-y-4 sm:space-y-3 w-full">
+            {/* スマホ: 縦並び、PC: 日付と時間を1行に */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 w-full">
+              <div className="col-span-2 sm:col-span-1">
                 <label className="block text-sm font-medium text-gray-700 mb-1">日付</label>
                 <input
                   type="date"
                   value={shift.date}
                   onChange={(e) => setShift({ ...shift, date: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-3 sm:py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full box-border border border-gray-300 rounded-lg px-3 py-3 sm:py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
               <div>
@@ -213,7 +213,7 @@ export const ShiftModal = memo(function ShiftModal({
                   type="time"
                   value={shift.startTime}
                   onChange={(e) => setShift({ ...shift, startTime: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-3 sm:py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full box-border border border-gray-300 rounded-lg px-3 py-3 sm:py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
               <div>
@@ -222,16 +222,16 @@ export const ShiftModal = memo(function ShiftModal({
                   type="time"
                   value={shift.endTime}
                   onChange={(e) => setShift({ ...shift, endTime: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-3 sm:py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full box-border border border-gray-300 rounded-lg px-3 py-3 sm:py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
             </div>
-            <div>
+            <div className="w-full">
               <label className="block text-sm font-medium text-gray-700 mb-1">備考</label>
               <textarea
                 value={shift.note || ''}
                 onChange={(e) => setShift({ ...shift, note: e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                className="w-full box-border border border-gray-300 rounded-lg px-3 py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
                 rows={2}
                 placeholder="任意で入力"
               />
@@ -239,7 +239,7 @@ export const ShiftModal = memo(function ShiftModal({
           </div>
 
           {/* ボタン */}
-          <div className="mt-6 flex gap-2 sm:justify-end">
+          <div className="mt-6 flex gap-2 w-full sm:justify-end">
             <button
               onClick={handleClose}
               className="flex-1 sm:flex-none px-4 py-3 sm:py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
