@@ -195,16 +195,16 @@ export const ShiftModal = memo(function ShiftModal({
             )}
           </div>
 
-          <div className="space-y-4 sm:space-y-3 w-full flex flex-col items-center sm:items-start">
-            {/* スマホ: 全て縦並び、PC: 日付と時間を1行に */}
-            <div className="flex flex-col sm:grid sm:grid-cols-3 gap-3 w-[80%] sm:w-full">
+          <div className="space-y-4 sm:space-y-3 w-full">
+            {/* PC: 日付と時間を1行に、スマホ: 各フィールド個別にpadding付きで表示 */}
+            <div className="hidden sm:grid sm:grid-cols-3 gap-3 w-full">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1 text-left">日付</label>
                 <input
                   type="date"
                   value={shift.date}
                   onChange={(e) => setShift({ ...shift, date: e.target.value })}
-                  className="w-full box-border border border-gray-300 rounded-lg px-3 py-3 sm:py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full box-border border border-gray-300 rounded-lg px-3 py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
               <div>
@@ -213,7 +213,7 @@ export const ShiftModal = memo(function ShiftModal({
                   type="time"
                   value={shift.startTime}
                   onChange={(e) => setShift({ ...shift, startTime: e.target.value })}
-                  className="w-full box-border border border-gray-300 rounded-lg px-3 py-3 sm:py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full box-border border border-gray-300 rounded-lg px-3 py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
               <div>
@@ -222,11 +222,41 @@ export const ShiftModal = memo(function ShiftModal({
                   type="time"
                   value={shift.endTime}
                   onChange={(e) => setShift({ ...shift, endTime: e.target.value })}
-                  className="w-full box-border border border-gray-300 rounded-lg px-3 py-3 sm:py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full box-border border border-gray-300 rounded-lg px-3 py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
             </div>
-            <div className="w-[80%] sm:w-full">
+            
+            {/* スマホ: 各フィールド個別に表示 */}
+            <div className="sm:hidden px-4 w-full">
+              <label className="block text-sm font-medium text-gray-700 mb-1 text-left">日付</label>
+              <input
+                type="date"
+                value={shift.date}
+                onChange={(e) => setShift({ ...shift, date: e.target.value })}
+                className="w-full box-border border border-gray-300 rounded-lg px-3 py-3 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            <div className="sm:hidden px-4 w-full">
+              <label className="block text-sm font-medium text-gray-700 mb-1 text-left">開始時刻</label>
+              <input
+                type="time"
+                value={shift.startTime}
+                onChange={(e) => setShift({ ...shift, startTime: e.target.value })}
+                className="w-full box-border border border-gray-300 rounded-lg px-3 py-3 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            <div className="sm:hidden px-4 w-full">
+              <label className="block text-sm font-medium text-gray-700 mb-1 text-left">終了時刻</label>
+              <input
+                type="time"
+                value={shift.endTime}
+                onChange={(e) => setShift({ ...shift, endTime: e.target.value })}
+                className="w-full box-border border border-gray-300 rounded-lg px-3 py-3 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            
+            <div className="px-4 sm:px-0 w-full">
               <label className="block text-sm font-medium text-gray-700 mb-1 text-left">備考</label>
               <textarea
                 value={shift.note || ''}
