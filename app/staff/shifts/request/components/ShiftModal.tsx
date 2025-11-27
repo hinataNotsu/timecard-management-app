@@ -244,7 +244,8 @@ export const ShiftModal = memo(function ShiftModal({
                 type="time"
                 value={shift.startTime}
                 onChange={(e) => setShift({ ...shift, startTime: e.target.value })}
-                className="w-full box-border border border-gray-300 rounded-lg px-3 py-3 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full max-w-full box-border border border-gray-300 rounded-lg px-3 py-3 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none"
+                style={{ WebkitAppearance: 'none', minWidth: 0 }}
               />
             </div>
             <div className="px-4 sm:px-0 w-full sm:hidden">
@@ -253,7 +254,8 @@ export const ShiftModal = memo(function ShiftModal({
                 type="time"
                 value={shift.endTime}
                 onChange={(e) => setShift({ ...shift, endTime: e.target.value })}
-                className="w-full box-border border border-gray-300 rounded-lg px-3 py-3 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full max-w-full box-border border border-gray-300 rounded-lg px-3 py-3 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none"
+                style={{ WebkitAppearance: 'none', minWidth: 0 }}
               />
             </div>
             
