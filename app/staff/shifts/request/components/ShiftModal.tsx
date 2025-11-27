@@ -227,14 +227,15 @@ export const ShiftModal = memo(function ShiftModal({
               </div>
             </div>
             
-            {/* スマホ: 備考と同じ構造でテスト */}
+            {/* スマホ: テスト - 日付をtextareaで表示 */}
             <div className="px-4 sm:px-0 w-full sm:hidden">
-              <label className="block text-sm font-medium text-gray-700 mb-1 text-left">日付</label>
-              <input
-                type="date"
+              <label className="block text-sm font-medium text-gray-700 mb-1 text-left">日付（テスト）</label>
+              <textarea
                 value={shift.date}
                 onChange={(e) => setShift({ ...shift, date: e.target.value })}
-                className="w-full box-border border border-gray-300 rounded-lg px-3 py-3 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full box-border border border-gray-300 rounded-lg px-3 py-2 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                rows={1}
+                placeholder="YYYY-MM-DD"
               />
             </div>
             <div className="px-4 sm:px-0 w-full sm:hidden">
