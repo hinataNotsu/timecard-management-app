@@ -10,7 +10,8 @@ import JapaneseHolidays from 'japanese-holidays';
 interface UserReport {
   userId: string;
   userName: string;
-  avatarUrl: string;
+  avatarSeed?: string;
+  avatarBgColor?: string;
   workDays: number;
   totalMinutes: number;
   nightMinutes: number;
@@ -96,14 +97,29 @@ export default function ReportPage() {
         
         // 保存済みレポートからデータを構築（status='confirmed'のみ）
         const reports: UserReport[] = [];
-        snap.forEach(d => {
+        for (const d of snap.docs) {
           const data = d.data();
           // 確定済み(confirmed)のレポートのみ表示、差し戻し済み(reverted)は除外
           if (data.status === 'confirmed') {
+            // ユーザー情報を取得してアバター情報を取得
+            let avatarSeed = data.userName;
+            let avatarBgColor: string | undefined;
+            try {
+              const userDoc = await getDoc(doc(db, 'users', data.userId));
+              if (userDoc.exists()) {
+                const userData = userDoc.data();
+                avatarSeed = userData.avatarSeed || userData.displayName || data.userName;
+                avatarBgColor = userData.avatarBackgroundColor;
+              }
+            } catch (e) {
+              console.warn('[Report] Failed to fetch user info:', e);
+            }
+            
             reports.push({
               userId: data.userId,
               userName: data.userName,
-              avatarUrl: '', // アバターURLは不要なので空文字
+              avatarSeed,
+              avatarBgColor,
               workDays: data.workDays || 0,
               totalMinutes: data.totalWorkMinutes || 0,
               nightMinutes: data.totalNightMinutes || 0,
@@ -116,7 +132,7 @@ export default function ReportPage() {
               total: data.totalAmount || 0,
             });
           }
-        });
+        }
         setSavedReport({ userReports: reports });
 
         setError(null);
@@ -197,6 +213,13 @@ export default function ReportPage() {
     a.download = `payroll_report_${y}-${String(m).padStart(2,'0')}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  // アバターURL生成関数
+  const avatarUrl = (seed: string, bgColor?: string) => {
+    const base = `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(seed)}`;
+    const params = bgColor ? `&backgroundColor=${encodeURIComponent(bgColor)}` : '&backgroundType=gradientLinear';
+    return `${base}${params}&fontWeight=700&radius=50`;
   };
 
   const prevMonth = () => setSelectedMonth(new Date(selectedMonth.getFullYear(), selectedMonth.getMonth()-1, 1));
@@ -338,9 +361,11 @@ export default function ReportPage() {
                     <tr key={r.userId} className="hover:bg-gray-50 cursor-pointer" onClick={() => showUserDetail(r.userId)}>
                       <td className="p-3 border-b">
                         <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-white text-xs font-semibold">
-                            {r.userName.charAt(0)}
-                          </div>
+                          <img 
+                            src={avatarUrl(r.avatarSeed || r.userName || r.userId, r.avatarBgColor)} 
+                            alt={r.userName} 
+                            className="w-8 h-8 rounded-full ring-1 ring-gray-200" 
+                          />
                           <span className="font-medium">{r.userName}</span>
                         </div>
                       </td>
