@@ -160,7 +160,7 @@ export const ShiftModal = memo(function ShiftModal({
     >
       <div 
         ref={sheetRef}
-        className={`bg-white rounded-t-xl sm:rounded-lg p-4 sm:p-6 w-full sm:max-w-md max-h-[90vh] overflow-y-auto ${isDragging ? '' : 'transition-transform duration-300 ease-out'} ${isVisible && dragY === 0 ? 'translate-y-0 sm:scale-100 sm:opacity-100' : !isVisible ? 'translate-y-full sm:translate-y-0 sm:scale-95 sm:opacity-0' : ''}`}
+        className={`bg-white rounded-t-xl sm:rounded-lg px-2 py-4 sm:p-6 w-[95%] max-w-md sm:max-w-md max-h-[90vh] overflow-y-auto ${isDragging ? '' : 'transition-transform duration-300 ease-out'} ${isVisible && dragY === 0 ? 'translate-y-0 sm:scale-100 sm:opacity-100' : !isVisible ? 'translate-y-full sm:translate-y-0 sm:scale-95 sm:opacity-0' : ''}`}
         style={{ 
           transform: dragY > 0 ? `translateY(${dragY}px)` : undefined,
         }}
@@ -170,42 +170,43 @@ export const ShiftModal = memo(function ShiftModal({
         onTouchEnd={handleTouchEnd}
       >
         {/* ドラッグハンドル（スマホ用） */}
-        <div className="sm:hidden flex justify-center mb-2 py-2 cursor-grab">
+        <div className="sm:hidden flex justify-center mb-2 py-1 cursor-grab">
           <div className="w-10 h-1 bg-gray-300 rounded-full"></div>
         </div>
 
-        <h3 className="text-lg font-semibold mb-4">
-          {editingId ? 'シフト編集' : 'シフト追加'}
-        </h3>
+        <div style={{ paddingLeft: '8px', paddingRight: '8px' }}>
+          <h3 className="text-lg font-semibold mb-3 sm:mb-4">
+            {editingId ? 'シフト編集' : 'シフト追加'}
+          </h3>
 
-        <div className="space-y-4">
+          <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">日付</label>
             <input
               type="date"
               value={shift.date}
               onChange={(e) => setShift({ ...shift, date: e.target.value })}
-              className="w-full border rounded-md px-3 py-3 sm:py-2 text-base"
+              className="border rounded-md px-2 py-3 sm:w-full sm:px-3 sm:py-2 text-sm sm:text-base"
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:gap-4">
-            <div>
+          <div className="flex gap-3 sm:gap-4">
+            <div className="sm:flex-1">
               <label className="block text-sm font-medium text-gray-700 mb-1">開始時刻</label>
               <input
                 type="time"
                 value={shift.startTime}
                 onChange={(e) => setShift({ ...shift, startTime: e.target.value })}
-                className="w-full border rounded-md px-3 py-3 sm:py-2 text-base"
+                className="border rounded-md px-1 py-3 sm:w-full sm:px-3 sm:py-2 text-sm sm:text-base"
               />
             </div>
-            <div>
+            <div className="sm:flex-1">
               <label className="block text-sm font-medium text-gray-700 mb-1">終了時刻</label>
               <input
                 type="time"
                 value={shift.endTime}
                 onChange={(e) => setShift({ ...shift, endTime: e.target.value })}
-                className="w-full border rounded-md px-3 py-3 sm:py-2 text-base"
+                className="border rounded-md px-1 py-3 sm:w-full sm:px-3 sm:py-2 text-sm sm:text-base"
               />
             </div>
           </div>
@@ -215,17 +216,21 @@ export const ShiftModal = memo(function ShiftModal({
             <textarea
               value={shift.note || ''}
               onChange={(e) => setShift({ ...shift, note: e.target.value })}
-              className="w-full border rounded-md px-3 py-3 sm:py-2 text-base"
+              className="w-full border rounded-md px-2 py-2 sm:px-3 text-sm sm:text-base"
               rows={3}
             />
           </div>
+          </div>
         </div>
 
-        <div className="flex justify-between mt-6 pb-4 sm:pb-0">
+        <div className="flex justify-between mt-6 pb-4 sm:pb-0" style={{ paddingLeft: '8px', paddingRight: '8px' }}>
           <div>
             {editingId && (
               <button
-                onClick={() => onDelete(editingId)}
+                onClick={() => {
+                  handleClose();
+                  onDelete(editingId);
+                }}
                 className="px-4 py-3 sm:py-2 text-red-600 hover:text-red-800"
               >
                 削除

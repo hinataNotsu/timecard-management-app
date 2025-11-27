@@ -191,8 +191,7 @@ export default function ShiftSubmitPage() {
     if (!deleteModal.shiftId) return;
     await deleteShift(deleteModal.shiftId);
     setDeleteModal({ isOpen: false, shiftId: null });
-    handleCloseModal();
-  }, [deleteModal.shiftId, deleteShift, handleCloseModal]);
+  }, [deleteModal.shiftId, deleteShift]);
 
   // リサイズ開始
   const handleResizeStart = useCallback((id: string, edge: 'start' | 'end', originalStart: string, originalEnd: string, startY: number) => {
