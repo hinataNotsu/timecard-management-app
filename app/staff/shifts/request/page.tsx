@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import ConfirmModal from '@/components/modals/ConfirmModal';
+import { useToast } from '@/components/Toast';
 
 import { CalendarHeader } from './components/CalendarHeader';
 import { MonthView } from './components/MonthView';
@@ -21,6 +21,7 @@ import type { ViewMode, ShiftEntry } from './utils/types';
 export default function ShiftSubmitPage() {
   const { userProfile } = useAuth();
   const router = useRouter();
+  const { showErrorToast, showConfirmToast, showSuccessToast } = useToast();
 
   // ビュー状態
   const [viewMode, setViewMode] = useState<ViewMode>('month');
@@ -35,10 +36,6 @@ export default function ShiftSubmitPage() {
     startTime: '09:00',
     endTime: '18:00',
     note: '',
-  });
-  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; shiftId: string | null }>({
-    isOpen: false,
-    shiftId: null,
   });
 
   // 組織設定フック
@@ -144,13 +141,13 @@ export default function ShiftSubmitPage() {
   const handleShiftClick = useCallback((shift: ShiftEntry) => {
     if (!canSubmitForDate(new Date(shift.date))) return;
     if (shift.status === 'approved' || shift.status === 'rejected') {
-      alert('このシフトは承認済みまたは却下済みのため編集できません');
+      showErrorToast('このシフトは承認済みまたは却下済みのため編集できません');
       return;
     }
     setNewShift(shift);
     setEditingId(shift.id || null);
     setIsAddingShift(true);
-  }, [canSubmitForDate]);
+  }, [canSubmitForDate, showErrorToast]);
 
   // 日付クリック（月ビュー用）
   const handleDateClick = useCallback((dateStr: string) => {
@@ -172,36 +169,38 @@ export default function ShiftSubmitPage() {
   }, []);
 
   // 削除リクエスト
-  const handleDeleteRequest = useCallback((id: string) => {
+  const handleDeleteRequest = useCallback(async (id: string) => {
     const shift = shifts.find(s => s.id === id);
     if (!shift) return;
     if (shift.status === 'approved' || shift.status === 'rejected') {
-      alert('このシフトは承認済みまたは却下済みのため削除できません');
+      showErrorToast('このシフトは承認済みまたは却下済みのため削除できません');
       return;
     }
     if (!canSubmitForDate(new Date(shift.date))) {
-      alert('この日のシフトは締切を過ぎているため削除できません');
+      showErrorToast('この日のシフトは締切を過ぎているため削除できません');
       return;
     }
-    setDeleteModal({ isOpen: true, shiftId: id });
-  }, [shifts, canSubmitForDate]);
-
-  // 削除確認
-  const handleConfirmDelete = useCallback(async () => {
-    if (!deleteModal.shiftId) return;
-    await deleteShift(deleteModal.shiftId);
-    setDeleteModal({ isOpen: false, shiftId: null });
-  }, [deleteModal.shiftId, deleteShift]);
+    
+    const confirmed = await showConfirmToast('このシフトを削除しますか？', {
+      confirmText: '削除',
+      cancelText: 'キャンセル'
+    });
+    
+    if (confirmed) {
+      await deleteShift(id);
+      showSuccessToast('シフトを削除しました');
+    }
+  }, [shifts, canSubmitForDate, showErrorToast, showConfirmToast, deleteShift]);
 
   // リサイズ開始
   const handleResizeStart = useCallback((id: string, edge: 'start' | 'end', originalStart: string, originalEnd: string, startY: number) => {
     const shift = shifts.find(s => s.id === id);
     if (shift && !canSubmitForDate(new Date(shift.date))) {
-      alert('この日のシフトは締切を過ぎているため変更できません');
+      showErrorToast('この日のシフトは締切を過ぎているため変更できません');
       return;
     }
     startResize(id, edge, originalStart, originalEnd, startY);
-  }, [shifts, canSubmitForDate, startResize]);
+  }, [shifts, canSubmitForDate, startResize, showErrorToast]);
 
   const displayDateForLock = viewMode === 'month' ? targetMonth : currentDate;
   const isSubmissionLocked = !canSubmitForDate(displayDateForLock);
@@ -272,15 +271,6 @@ export default function ShiftSubmitPage() {
           onClose={handleCloseModal}
           canSubmitForDate={canSubmitForDate}
         />
-
-        {/* 削除確認モーダル */}
-<ConfirmModal
-  isOpen={deleteModal.isOpen}
-  title="シフトを削除"
-  message="このシフトを削除しますか？"
-  onConfirm={handleConfirmDelete}
-  onClose={() => setDeleteModal({ isOpen: false, shiftId: null })}
-/>
       </div>
     </div>
   );

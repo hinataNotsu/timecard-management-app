@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, memo } from 'react';
 import type { ShiftEntry } from '../utils/types';
+import { useToast } from '@/components/Toast';
 
 interface ShiftModalProps {
   isOpen: boolean;
@@ -24,6 +25,7 @@ export const ShiftModal = memo(function ShiftModal({
   onClose,
   canSubmitForDate,
 }: ShiftModalProps) {
+  const { showErrorToast } = useToast();
   const [shift, setShift] = useState<ShiftEntry>(initialShift);
   const [isVisible, setIsVisible] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
@@ -124,7 +126,7 @@ export const ShiftModal = memo(function ShiftModal({
     if (!shift.date || !shift.startTime || !shift.endTime) return;
 
     if (shift.startTime >= shift.endTime) {
-      alert('終了時刻は開始時刻より後にしてください');
+      showErrorToast('終了時刻は開始時刻より後にしてください');
       return;
     }
 
@@ -132,12 +134,12 @@ export const ShiftModal = memo(function ShiftModal({
     const [endH, endM] = shift.endTime.split(':').map(v => parseInt(v, 10));
     const durationMin = (endH * 60 + endM) - (startH * 60 + startM);
     if (durationMin < 30) {
-      alert('シフトは30分以上で登録してください');
+      showErrorToast('シフトは30分以上で登録してください');
       return;
     }
 
     if (!canSubmitForDate(new Date(shift.date))) {
-      alert('この日のシフトは締切を過ぎているため変更できません');
+      showErrorToast('この日のシフトは締切を過ぎているため変更できません');
       return;
     }
 
