@@ -196,7 +196,7 @@ export const ShiftModal = memo(function ShiftModal({
           </div>
 
           <div className="space-y-4 sm:space-y-3 w-full">
-            {/* PC: 日付と時間を1行に、スマホ: 各フィールド個別にpadding付きで表示 */}
+            {/* PC: 日付と時間を1行に */}
             <div className="hidden sm:grid sm:grid-cols-3 gap-3 w-full">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1 text-left">日付</label>
@@ -227,8 +227,8 @@ export const ShiftModal = memo(function ShiftModal({
               </div>
             </div>
             
-            {/* スマホ: 各フィールド個別に表示 */}
-            <div className="sm:hidden px-4 w-full">
+            {/* スマホ: 備考と同じ構造でテスト */}
+            <div className="px-4 sm:px-0 w-full sm:hidden">
               <label className="block text-sm font-medium text-gray-700 mb-1 text-left">日付</label>
               <input
                 type="date"
@@ -237,7 +237,7 @@ export const ShiftModal = memo(function ShiftModal({
                 className="w-full box-border border border-gray-300 rounded-lg px-3 py-3 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
-            <div className="sm:hidden px-4 w-full">
+            <div className="px-4 sm:px-0 w-full sm:hidden">
               <label className="block text-sm font-medium text-gray-700 mb-1 text-left">開始時刻</label>
               <input
                 type="time"
@@ -246,7 +246,7 @@ export const ShiftModal = memo(function ShiftModal({
                 className="w-full box-border border border-gray-300 rounded-lg px-3 py-3 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
-            <div className="sm:hidden px-4 w-full">
+            <div className="px-4 sm:px-0 w-full sm:hidden">
               <label className="block text-sm font-medium text-gray-700 mb-1 text-left">終了時刻</label>
               <input
                 type="time"
