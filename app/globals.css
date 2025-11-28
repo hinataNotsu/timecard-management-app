@@ -39,61 +39,14 @@ body {
     color-adjust: exact !important;
   }
   
-  /* Tailwindの印刷用クラスを有効化 */
-  .print\:hidden {
-    display: none !important;
-  }
-  
-  .print\:relative {
-    position: relative !important;
-  }
-  
-  .print\:bg-white {
-    background-color: white !important;
-  }
-  
-  .print\:z-auto {
-    z-index: auto !important;
-  }
-  
-  .print\:shadow-none {
-    box-shadow: none !important;
-  }
-  
-  .print\:max-h-none {
+  /* 印刷時はすべて表示 */
+  html, body, * {
+    overflow: visible !important;
     max-height: none !important;
   }
   
-  .print\:overflow-visible {
-    overflow: visible !important;
-  }
-  
-  .print\:border-b-2 {
-    border-bottom-width: 2px !important;
-  }
-  
-  .print\:border-gray-300 {
-    border-color: #d1d5db !important;
-  }
-  
-  /* bodyの背景を白に */
   body {
-    background: white !important;
-  }
-  
-  /* 固定要素を通常のフローに */
-  .fixed {
-    position: static !important;
-  }
-  
-  /* フレックスコンテナを維持 */
-  .flex {
-    display: flex !important;
-  }
-  
-  /* オーバーフローを表示 */
-  .overflow-hidden,
-  .overflow-y-auto {
-    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 }

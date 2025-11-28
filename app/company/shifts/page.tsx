@@ -943,27 +943,30 @@ export default function AdminShiftListPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 py-6 print:hidden">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl font-bold">シフト一覧（管理者）</h1>
-          <button onClick={() => router.push('/company/dashboard')} className="text-sm text-gray-600 hover:text-gray-900">← ダッシュボード</button>
-        </div>
+      <div className="max-w-7xl mx-auto px-4 py-6">
+        {/* スクリーンショットモード時はカレンダーを完全に非表示 */}
+        {!screenshotMode && (
+          <>
+            <div className="mb-6 flex items-center justify-between">
+              <h1 className="text-2xl font-bold">シフト一覧（管理者）</h1>
+              <button onClick={() => router.push('/company/dashboard')} className="text-sm text-gray-600 hover:text-gray-900">← ダッシュボード</button>
+            </div>
 
-        <div className="bg-white rounded-lg shadow p-4 mb-6 flex flex-wrap gap-3 items-center justify-between">
-          <div className="flex items-center gap-2">
-            <button onClick={prevMonth} className="px-2 py-1 border rounded">←</button>
-            <div className="font-semibold">{selectedMonth.getFullYear()}年 {selectedMonth.getMonth() + 1}月</div>
-            <button onClick={nextMonth} className="px-2 py-1 border rounded">→</button>
-          </div>
-          <button
-            onClick={() => setShowTimeSettings(true)}
-            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-sm font-medium"
-          >
-            時間設定
-          </button>
-        </div>
+            <div className="bg-white rounded-lg shadow p-4 mb-6 flex flex-wrap gap-3 items-center justify-between">
+              <div className="flex items-center gap-2">
+                <button onClick={prevMonth} className="px-2 py-1 border rounded">←</button>
+                <div className="font-semibold">{selectedMonth.getFullYear()}年 {selectedMonth.getMonth() + 1}月</div>
+                <button onClick={nextMonth} className="px-2 py-1 border rounded">→</button>
+              </div>
+              <button
+                onClick={() => setShowTimeSettings(true)}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-sm font-medium"
+              >
+                時間設定
+              </button>
+            </div>
 
-        <div className="bg-white rounded-lg shadow p-4">
+            <div className="bg-white rounded-lg shadow p-4">
           {/* 月カレンダー（週表示：日〜土） */}
           <div className="mb-4">
               <div className="grid grid-cols-7 border-b border-gray-300 border-opacity-50">
@@ -1029,11 +1032,13 @@ export default function AdminShiftListPage() {
               </div>
             </div>
         </div>
+          </>
+        )}
 
         {/* 選択日があれば時間軸表示（全ユーザー）- モーダル表示 */}
         {selectedDay && (
-              <div className="fixed inset-0 bg-black/50 z-40 flex items-start justify-center pt-8 p-4 print:relative print:bg-white print:z-auto" onClick={() => { setSelectedDay(null); setDayShifts([]); setEditedShifts(new Map()); setScreenshotMode(false); }}>
-                <div className="bg-white rounded-lg shadow-2xl w-full max-w-7xl max-h-[90vh] overflow-hidden flex flex-col print:shadow-none print:max-h-none print:overflow-visible" onClick={(e) => e.stopPropagation()}>
+              <div id="shift-modal" className={screenshotMode ? 'bg-white w-full h-screen overflow-auto p-8' : 'fixed inset-0 z-40 flex items-start justify-center bg-black/50 pt-8 p-4'} onClick={screenshotMode ? undefined : () => { setSelectedDay(null); setDayShifts([]); setEditedShifts(new Map()); setScreenshotMode(false); }}>
+                <div className={screenshotMode ? 'bg-white w-full' : 'bg-white rounded-lg shadow-2xl w-full flex flex-col max-w-7xl max-h-[90vh] overflow-hidden'} onClick={(e) => e.stopPropagation()}>
                   <div className="px-6 py-4 border-b flex items-center justify-between bg-gray-50 print:border-b-2 print:border-gray-300">
                     <div className="font-semibold text-lg">
                       {`${selectedDay.getFullYear()}年${selectedDay.getMonth() + 1}月${selectedDay.getDate()}日（${['日', '月', '火', '水', '木', '金', '土'][selectedDay.getDay()]}）`}
@@ -1169,7 +1174,7 @@ export default function AdminShiftListPage() {
                           </div>
                         </div>
 
-                        <div className="overflow-x-auto">
+                        <div className={screenshotMode ? 'overflow-x-hidden' : 'overflow-x-auto'}>
                           <div style={{ minWidth: '1140px' }}>
                       {/* 時間目盛り */}
                       <div className="flex items-center mb-2" style={{ gap: '12px' }}>
@@ -1178,7 +1183,7 @@ export default function AdminShiftListPage() {
                           <div className="flex h-6">
                             {Array.from({ length: timeRangeEnd - timeRangeStart }).map((_, i) => {
                               const hh = timeRangeStart + i;
-                              return <div key={hh} className="flex-1 text-[11px] text-center border-l border-gray-100">{hh}:00</div>;
+                              return <div key={hh} className="flex-1 text-xs text-left pl-1 border-l border-gray-100">{hh}</div>;
                             })}
                           </div>
                         </div>
@@ -1186,7 +1191,7 @@ export default function AdminShiftListPage() {
                       </div>
 
                       {/* ユーザー行（当日にシフト提出した人のみ表示） */}
-                      <div className="space-y-4">
+                      <div className="space-y-2">
                         {(() => {
                           // ユニークなユーザー一覧を dayShifts から作成
                           const map = new Map<string, { id: string; name: string; seed?: string; bgColor?: string }>();
@@ -1229,11 +1234,11 @@ export default function AdminShiftListPage() {
                                 className="cursor-move"
                               >
                                 <div className="flex items-center gap-2 select-none">
-                                  <img src={avatarUrl(user.seed || user.name || user.id, user.bgColor)} alt={user.name} className="w-8 h-8 rounded-full ring-1 ring-gray-200" />
+                                  <img src={avatarUrl(user.seed || user.name || user.id, user.bgColor)} alt={user.name} className="w-7 h-7 rounded-full ring-1 ring-gray-200" />
                                   <div className="text-sm">{user.name}</div>
                                 </div>
                               </div>
-                              <div style={{ width: '900px', flexShrink: 0 }} className="relative h-12 bg-white border rounded">
+                              <div style={{ width: '900px', flexShrink: 0 }} className="relative h-8 bg-white border rounded">
                                 {/* 背景の目盛り線 */}
                                 <div className="absolute inset-0">
                                   <div className="h-full flex">
@@ -1370,7 +1375,7 @@ export default function AdminShiftListPage() {
                                       return (
                                         <div 
                                           key={s.id + '-' + idx} 
-                                          className={`absolute top-1/4 h-1/2 rounded text-[12px] text-white flex items-center group ${screenshotMode ? '' : 'cursor-pointer'}`}
+                                          className={`absolute inset-0 rounded text-white flex items-center group ${screenshotMode ? '' : 'cursor-pointer'}`}
                                           style={{ left: `${leftPct}%`, width: `${finalWidthPct}%`, backgroundColor: bgColor, zIndex: 20, boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}
                                           onClick={screenshotMode ? undefined : handleBarClick}
                                         >
@@ -1380,7 +1385,7 @@ export default function AdminShiftListPage() {
                                               onMouseDown={(e) => handleDragStart(e, 'start')}
                                             />
                                           )}
-                                          <div className="flex-1 text-left pl-3 pr-3 truncate pointer-events-none">{displayStart} - {displayEnd}</div>
+                                          <div className="flex-1 text-left pl-2 pr-2 truncate pointer-events-none text-base font-medium">{displayStart} - {displayEnd}</div>
                                           {!screenshotMode && (
                                             <div
                                               className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black hover:bg-opacity-30 rounded-r opacity-0 group-hover:opacity-100 transition-opacity bg-gray-900 bg-opacity-20"
@@ -1395,11 +1400,11 @@ export default function AdminShiftListPage() {
                               {!screenshotMode && (
                                 <div style={{ width: '192px', flexShrink: 0 }}>
                                   {userNotes ? (
-                                    <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded border border-gray-200 h-12 overflow-y-auto">
+                                    <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded border border-gray-200 h-8 overflow-y-auto">
                                       {userNotes}
                                     </div>
                                   ) : (
-                                    <div className="text-xs text-gray-400 bg-gray-50 p-2 rounded border border-gray-200 h-12 flex items-center justify-center">
+                                    <div className="text-xs text-gray-400 bg-gray-50 p-2 rounded border border-gray-200 h-8 flex items-center justify-center">
                                       備考なし
                                     </div>
                                   )}
@@ -1857,7 +1862,7 @@ export default function AdminShiftListPage() {
                     onClick={async () => {
                       if (editModalTime.startTime && editModalTime.endTime) {
                         if (isAddingNewShift) {
-                          // 新規シフトを作成
+                          // 新規シフトを作成（管理者が追加するため承認済みとして作成）
                           try {
                             const dayStart = new Date(editingShift.date.getFullYear(), editingShift.date.getMonth(), editingShift.date.getDate(), 0, 0, 0, 0);
                             const shiftData = {
@@ -1869,7 +1874,7 @@ export default function AdminShiftListPage() {
                               originalStartTime: editModalTime.startTime,
                               originalEndTime: editModalTime.endTime,
                               note: '',
-                              status: 'pending',
+                              status: 'approved',
                               hourlyWage: orgSettings?.defaultHourlyWage || 1100,
                               labelId: tempLabelId === undefined ? null : tempLabelId,
                               createdAt: Timestamp.now(),
@@ -1882,6 +1887,7 @@ export default function AdminShiftListPage() {
                             setEditingShift(null);
                             setIsAddingNewShift(false);
                             setTempLabelId(undefined);
+                            showSuccessToast('シフトを追加しました');
                           } catch (e) {
                             console.error('シフト追加エラー:', e);
                             showErrorToast('シフトの追加に失敗しました');
