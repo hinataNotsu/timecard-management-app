@@ -78,6 +78,9 @@ export default function AdminShiftListPage() {
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [addingUser, setAddingUser] = useState(false);
   const [isAddingNewShift, setIsAddingNewShift] = useState(false);
+  const [screenshotMode, setScreenshotMode] = useState(false);
+  const [dayNotes, setDayNotes] = useState<Map<string, string>>(new Map());
+  const [editingDayNote, setEditingDayNote] = useState('');
   
   const availableColors = [
     { name: '紫', value: '#8b5cf6' },
@@ -135,6 +138,11 @@ export default function AdminShiftListPage() {
             } else {
               console.log('[Admin List] 保存されたラベルがありません');
               setShiftLabels([]);
+            }
+            // 日付ごとの備考を読み込む
+            if (o.dayNotes) {
+              console.log('[Admin List] 日付備考を読み込みました:', o.dayNotes);
+              setDayNotes(new Map(Object.entries(o.dayNotes)));
             }
           }
         } catch (e) {
@@ -617,6 +625,11 @@ export default function AdminShiftListPage() {
 
       console.log('[Debug] dayShifts設定:', rows.length, '件');
       setDayShifts(rows);
+      
+      // 選択日の備考を読み込む
+      const dayKey = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+      const note = dayNotes.get(dayKey) || '';
+      setEditingDayNote(note);
     } catch (e) {
       console.error('[Debug] fetchDayShiftsエラー:', e);
       setDayShifts([]);
@@ -742,6 +755,32 @@ export default function AdminShiftListPage() {
       console.log('[Debug] Firestoreに保存完了');
     } catch (e) {
       console.error('[Debug] 順序の保存に失敗:', e);
+    }
+  };
+
+  const saveDayNote = async () => {
+    if (!selectedDay || !userProfile?.currentOrganizationId) return;
+    
+    const dayKey = `${selectedDay.getFullYear()}-${String(selectedDay.getMonth() + 1).padStart(2, '0')}-${String(selectedDay.getDate()).padStart(2, '0')}`;
+    const newDayNotes = new Map(dayNotes);
+    
+    if (editingDayNote.trim()) {
+      newDayNotes.set(dayKey, editingDayNote.trim());
+    } else {
+      newDayNotes.delete(dayKey);
+    }
+    
+    setDayNotes(newDayNotes);
+    
+    try {
+      const dayNotesObj = Object.fromEntries(newDayNotes);
+      await updateDoc(doc(db, 'organizations', userProfile.currentOrganizationId), {
+        dayNotes: dayNotesObj,
+      });
+      showSuccessToast('備考を保存しました');
+    } catch (e) {
+      console.error('Failed to save day note:', e);
+      showErrorToast('備考の保存に失敗しました');
     }
   };
 
@@ -904,7 +943,7 @@ export default function AdminShiftListPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 py-6">
+      <div className="max-w-7xl mx-auto px-4 py-6 print:hidden">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-bold">シフト一覧（管理者）</h1>
           <button onClick={() => router.push('/company/dashboard')} className="text-sm text-gray-600 hover:text-gray-900">← ダッシュボード</button>
@@ -993,12 +1032,14 @@ export default function AdminShiftListPage() {
 
         {/* 選択日があれば時間軸表示（全ユーザー）- モーダル表示 */}
         {selectedDay && (
-              <div className="fixed inset-0 bg-black/50 z-40 flex items-start justify-center pt-8 p-4" onClick={() => { setSelectedDay(null); setDayShifts([]); setEditedShifts(new Map()); }}>
-                <div className="bg-white rounded-lg shadow-2xl w-full max-w-7xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-                  <div className="px-6 py-4 border-b flex items-center justify-between bg-gray-50">
-                    <div className="font-semibold text-lg">{selectedDay.getFullYear()}年{selectedDay.getMonth() + 1}月{selectedDay.getDate()}日 のシフト（時間軸）</div>
-                    <div className="flex items-center gap-2">
-                      {editedShifts.size > 0 && (
+              <div className="fixed inset-0 bg-black/50 z-40 flex items-start justify-center pt-8 p-4 print:relative print:bg-white print:z-auto" onClick={() => { setSelectedDay(null); setDayShifts([]); setEditedShifts(new Map()); setScreenshotMode(false); }}>
+                <div className="bg-white rounded-lg shadow-2xl w-full max-w-7xl max-h-[90vh] overflow-hidden flex flex-col print:shadow-none print:max-h-none print:overflow-visible" onClick={(e) => e.stopPropagation()}>
+                  <div className="px-6 py-4 border-b flex items-center justify-between bg-gray-50 print:border-b-2 print:border-gray-300">
+                    <div className="font-semibold text-lg">
+                      {`${selectedDay.getFullYear()}年${selectedDay.getMonth() + 1}月${selectedDay.getDate()}日（${['日', '月', '火', '水', '木', '金', '土'][selectedDay.getDay()]}）`}
+                    </div>
+                    <div className="flex items-center gap-2 print:hidden">
+                      {!screenshotMode && editedShifts.size > 0 && (
                         <button
                           onClick={saveChanges}
                           disabled={saving}
@@ -1007,7 +1048,36 @@ export default function AdminShiftListPage() {
                           {saving ? '保存中...' : `変更を保存 (${editedShifts.size})`}
                         </button>
                       )}
-                      {dayShifts.filter(s => s.status !== 'approved').length > 0 && (
+                      <button
+                        onClick={() => setScreenshotMode(!screenshotMode)}
+                        className={`px-3 py-2 rounded text-sm font-semibold flex items-center gap-1.5 ${
+                          screenshotMode 
+                            ? 'bg-gray-600 text-white hover:bg-gray-700' 
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                        title="スクリーンショット/印刷 モード"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                        </svg>
+                      </button>
+                      {screenshotMode && (
+                        <button
+                          onClick={() => window.print()}
+                          className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-semibold flex items-center gap-1"
+                          title="印刷"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                          </svg>
+                          <span>印刷</span>
+                        </button>
+                      )}
+                      {!screenshotMode && dayShifts.filter(s => s.status !== 'approved').length > 0 && (
                         <button
                           onClick={() => setShowBulkApprovalConfirm(true)}
                           className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-semibold"
@@ -1015,13 +1085,15 @@ export default function AdminShiftListPage() {
                           一括確定
                         </button>
                       )}
-                      <button 
-                        onClick={() => { setSelectedDay(null); setDayShifts([]); setEditedShifts(new Map()); }} 
-                        className="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-200 text-gray-600 hover:text-gray-900 text-xl font-bold"
-                        title="閉じる"
-                      >
-                        ×
-                      </button>
+                      {!screenshotMode && (
+                        <button 
+                          onClick={() => { setSelectedDay(null); setDayShifts([]); setEditedShifts(new Map()); setScreenshotMode(false); }} 
+                          className="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-200 text-gray-600 hover:text-gray-900 text-xl font-bold"
+                          title="閉じる"
+                        >
+                          ×
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="flex-1 overflow-y-auto p-6">
@@ -1032,17 +1104,21 @@ export default function AdminShiftListPage() {
                         {/* 凡例 */}
                         <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
                           <span className="font-semibold text-gray-700">色の意味:</span>
-                          <div className="flex items-center gap-1.5">
-                            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#2563eb' }}></div>
-                            <span>申請中</span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#dc2626' }}></div>
-                            <span>却下</span>
-                          </div>
+                          {!screenshotMode && (
+                            <>
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-4 h-4 rounded" style={{ backgroundColor: '#2563eb' }}></div>
+                                <span>申請中</span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-4 h-4 rounded" style={{ backgroundColor: '#dc2626' }}></div>
+                                <span>却下</span>
+                              </div>
+                            </>
+                          )}
                           <div className="flex items-center gap-1.5">
                             <div className="w-4 h-4 rounded" style={{ backgroundColor: '#16a34a' }}></div>
-                            <span>承認済み（未分類）</span>
+                            <span>承認済み（役職自由）</span>
                           </div>
                           {shiftLabels.map(label => (
                             <div key={label.id} className="flex items-center gap-1.5">
@@ -1050,14 +1126,49 @@ export default function AdminShiftListPage() {
                               <span>{label.name}</span>
                             </div>
                           ))}
-                          <button
-                            onClick={() => setShowLabelManager(true)}
-                            className="ml-2 px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-sm font-medium flex items-center gap-1"
-                          >
-                            <span className="text-lg leading-none">+</span>
-                            <span>ラベル管理</span>
-                          </button>
+                          {!screenshotMode && (
+                            <button
+                              onClick={() => setShowLabelManager(true)}
+                              className="ml-2 px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-sm font-medium flex items-center gap-1"
+                            >
+                              <span className="text-lg leading-none">+</span>
+                              <span>ラベル管理</span>
+                            </button>
+                          )}
                         </div>
+
+                        {/* 全体備考欄 */}
+                        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                          <div className="flex items-start gap-3">
+                            <div className="flex-shrink-0 mt-1">
+                              <span className="text-sm font-semibold text-amber-900">📝 全体備考:</span>
+                            </div>
+                            {screenshotMode ? (
+                              editingDayNote && (
+                                <div className="flex-1 text-sm text-gray-700 whitespace-pre-wrap">
+                                  {editingDayNote}
+                                </div>
+                              )
+                            ) : (
+                              <div className="flex-1 flex gap-2">
+                                <input
+                                  type="text"
+                                  value={editingDayNote}
+                                  onChange={(e) => setEditingDayNote(e.target.value)}
+                                  placeholder="例: 〇〇キャンペーン期間、繁忙期対応など"
+                                  className="flex-1 px-3 py-1.5 text-sm border border-amber-300 rounded focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+                                />
+                                <button
+                                  onClick={saveDayNote}
+                                  className="px-4 py-1.5 bg-amber-600 text-white text-sm rounded hover:bg-amber-700 font-medium whitespace-nowrap"
+                                >
+                                  保存
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
                         <div className="overflow-x-auto">
                           <div style={{ minWidth: '1140px' }}>
                       {/* 時間目盛り */}
@@ -1071,7 +1182,7 @@ export default function AdminShiftListPage() {
                             })}
                           </div>
                         </div>
-                        <div style={{ width: '192px', flexShrink: 0 }} />
+                        {!screenshotMode && <div style={{ width: '192px', flexShrink: 0 }} />}
                       </div>
 
                       {/* ユーザー行（当日にシフト提出した人のみ表示） */}
@@ -1259,50 +1370,58 @@ export default function AdminShiftListPage() {
                                       return (
                                         <div 
                                           key={s.id + '-' + idx} 
-                                          className="absolute top-1/4 h-1/2 rounded text-[12px] text-white flex items-center group cursor-pointer" 
+                                          className={`absolute top-1/4 h-1/2 rounded text-[12px] text-white flex items-center group ${screenshotMode ? '' : 'cursor-pointer'}`}
                                           style={{ left: `${leftPct}%`, width: `${finalWidthPct}%`, backgroundColor: bgColor, zIndex: 20, boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}
-                                          onClick={handleBarClick}
+                                          onClick={screenshotMode ? undefined : handleBarClick}
                                         >
-                                          <div
-                                            className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black hover:bg-opacity-30 rounded-l opacity-0 group-hover:opacity-100 transition-opacity bg-gray-900 bg-opacity-20"
-                                            onMouseDown={(e) => handleDragStart(e, 'start')}
-                                          />
+                                          {!screenshotMode && (
+                                            <div
+                                              className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black hover:bg-opacity-30 rounded-l opacity-0 group-hover:opacity-100 transition-opacity bg-gray-900 bg-opacity-20"
+                                              onMouseDown={(e) => handleDragStart(e, 'start')}
+                                            />
+                                          )}
                                           <div className="flex-1 text-left pl-3 pr-3 truncate pointer-events-none">{displayStart} - {displayEnd}</div>
-                                          <div
-                                            className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black hover:bg-opacity-30 rounded-r opacity-0 group-hover:opacity-100 transition-opacity bg-gray-900 bg-opacity-20"
-                                            onMouseDown={(e) => handleDragStart(e, 'end')}
-                                          />
+                                          {!screenshotMode && (
+                                            <div
+                                              className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black hover:bg-opacity-30 rounded-r opacity-0 group-hover:opacity-100 transition-opacity bg-gray-900 bg-opacity-20"
+                                              onMouseDown={(e) => handleDragStart(e, 'end')}
+                                            />
+                                          )}
                                         </div>
                                       );
                                     })}
                                   </div>
                               </div>
-                              <div style={{ width: '192px', flexShrink: 0 }}>
-                                {userNotes ? (
-                                  <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded border border-gray-200 h-12 overflow-y-auto">
-                                    {userNotes}
-                                  </div>
-                                ) : (
-                                  <div className="text-xs text-gray-400 bg-gray-50 p-2 rounded border border-gray-200 h-12 flex items-center justify-center">
-                                    備考なし
-                                  </div>
-                                )}
-                              </div>
+                              {!screenshotMode && (
+                                <div style={{ width: '192px', flexShrink: 0 }}>
+                                  {userNotes ? (
+                                    <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded border border-gray-200 h-12 overflow-y-auto">
+                                      {userNotes}
+                                    </div>
+                                  ) : (
+                                    <div className="text-xs text-gray-400 bg-gray-50 p-2 rounded border border-gray-200 h-12 flex items-center justify-center">
+                                      備考なし
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           );
                           });
                         })()}
                         
                         {/* ユーザー追加ボタン */}
-                        <div className="flex items-center justify-center pt-4 border-t border-gray-200">
-                          <button
-                            onClick={() => setShowAddUserModal(true)}
-                            className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm"
-                          >
-                            <span className="text-xl">+</span>
-                            <span>スタッフを追加</span>
-                          </button>
-                        </div>
+                        {!screenshotMode && (
+                          <div className="flex items-center justify-center pt-4 border-t border-gray-200">
+                            <button
+                              onClick={() => setShowAddUserModal(true)}
+                              className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm"
+                            >
+                              <span className="text-xl">+</span>
+                              <span>スタッフを追加</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                           </div>
                         </div>
