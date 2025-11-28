@@ -173,6 +173,9 @@ export function useShiftData({ uid, orgId, defaultHourlyWage }: UseShiftDataProp
           startTime: shift.startTime,
           endTime: shift.endTime,
           note: shift.note ?? '',
+          // 時間を変更した場合は元の希望時間も更新
+          originalStartTime: shift.startTime,
+          originalEndTime: shift.endTime,
         });
       }
       setShifts(prev => prev.map(s => s.id === id ? { ...s, ...shift } : s));
@@ -205,7 +208,13 @@ export function useShiftData({ uid, orgId, defaultHourlyWage }: UseShiftDataProp
   // リサイズ更新
   const updateShiftTime = useCallback(async (id: string, startTime: string, endTime: string): Promise<boolean> => {
     try {
-      await updateDoc(doc(db, 'shifts', id), { startTime, endTime });
+      await updateDoc(doc(db, 'shifts', id), { 
+        startTime, 
+        endTime,
+        // ドラッグでの時間変更時も元の希望時間を更新
+        originalStartTime: startTime,
+        originalEndTime: endTime,
+      });
       setShifts(prev => prev.map(s => s.id === id ? { ...s, startTime, endTime } : s));
       return true;
     } catch (e) {

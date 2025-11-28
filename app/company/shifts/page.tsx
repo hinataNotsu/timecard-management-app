@@ -4,10 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import JapaneseHolidays from 'japanese-holidays';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { collection, doc, getDoc, getDocs, query, where, orderBy, updateDoc, addDoc, Timestamp as FirestoreTimestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, where, orderBy, updateDoc, addDoc, deleteDoc, Timestamp as FirestoreTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Timestamp } from 'firebase/firestore';
-import ConfirmModal from '@/components/modals/ConfirmModal';
+import { useToast } from '@/components/Toast';
 
 interface ShiftLabel {
   id: string;
@@ -38,6 +38,7 @@ interface ShiftRow {
 export default function AdminShiftListPage() {
   const { userProfile } = useAuth();
   const router = useRouter();
+  const { showSuccessToast, showErrorToast, showConfirmToast } = useToast();
   const [shifts, setShifts] = useState<ShiftRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState(() => {
@@ -49,7 +50,6 @@ export default function AdminShiftListPage() {
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [dayShifts, setDayShifts] = useState<ShiftRow[]>([]);
   const [dayLoading, setDayLoading] = useState(false);
-  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; type: 'approve' | 'deleteLabel'; message: string; onConfirm: () => void }>({ isOpen: false, type: 'approve', message: '', onConfirm: () => {} });
   const [orgSettings, setOrgSettings] = useState<{ defaultHourlyWage: number; nightPremiumEnabled: boolean; nightPremiumRate: number; nightStart: string; nightEnd: string } | null>(null);
   const [allOrgUsers, setAllOrgUsers] = useState<{ id: string; name: string; seed?: string; bgColor?: string }[]>([]);
   const [editedShifts, setEditedShifts] = useState<Map<string, { startTime: string; endTime: string }>>(new Map());
@@ -75,6 +75,9 @@ export default function AdminShiftListPage() {
   const [tempTimeEnd, setTempTimeEnd] = useState(24);
   const [userOrder, setUserOrder] = useState<string[]>([]);
   const [draggedUserId, setDraggedUserId] = useState<string | null>(null);
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [addingUser, setAddingUser] = useState(false);
+  const [isAddingNewShift, setIsAddingNewShift] = useState(false);
   
   const availableColors = [
     { name: '紫', value: '#8b5cf6' },
@@ -432,7 +435,8 @@ export default function AdminShiftListPage() {
     // 希望時間外のシフトがあれば確認
     if (outOfRangeShifts.length > 0) {
       const message = `以下のシフトが希望外の時間を含んでいます。保存してよろしいですか？\n\n${outOfRangeShifts.map(s => `${s.userName} (${s.original} → ${s.modified})`).join('\n')}`;
-      if (!confirm(message)) {
+      const confirmed = await showConfirmToast(message, { confirmText: '保存する', cancelText: 'キャンセル' });
+      if (!confirmed) {
         // キャンセルされた場合、希望時間外のシフトの編集を取り消す（元の時間に戻す）
         const newEditedShifts = new Map(editedShifts);
         for (const item of outOfRangeShifts) {
@@ -457,10 +461,10 @@ export default function AdminShiftListPage() {
       if (selectedDay) {
         await fetchDayShifts(selectedDay);
       }
-      alert('シフトを保存しました');
+      showSuccessToast('シフトを保存しました');
     } catch (error) {
       console.error('Save error:', error);
-      alert('保存に失敗しました');
+      showErrorToast('保存に失敗しました');
     } finally {
       setSaving(false);
     }
@@ -655,7 +659,7 @@ export default function AdminShiftListPage() {
       } as any);
       setShifts(prev => prev.map(s => s.id === id ? { ...s, status: 'approved', approvedByName: userProfile.displayName || s.approvedByName || '', approvedAt: new Date(), rejectReason: null } : s));
     } catch (e) {
-      alert('承認に失敗しました');
+      showErrorToast('承認に失敗しました');
       console.error(e);
     }
   };
@@ -672,7 +676,7 @@ export default function AdminShiftListPage() {
       } as any);
       setShifts(prev => prev.map(s => s.id === id ? { ...s, status: 'rejected', approvedByName: null, approvedAt: null, rejectReason: reason || '' } : s));
     } catch (e) {
-      alert('却下に失敗しました');
+      showErrorToast('却下に失敗しました');
       console.error(e);
     }
   };
@@ -687,9 +691,9 @@ export default function AdminShiftListPage() {
       setTimeRangeStart(tempTimeStart);
       setTimeRangeEnd(tempTimeEnd);
       setShowTimeSettings(false);
-      alert('時間設定を保存しました');
+      showSuccessToast('時間設定を保存しました');
     } catch (e) {
-      alert('保存に失敗しました');
+      showErrorToast('保存に失敗しました');
       console.error(e);
     }
   };
@@ -741,40 +745,157 @@ export default function AdminShiftListPage() {
     }
   };
 
+  const addUserToDay = (userId: string) => {
+    if (!selectedDay || !userProfile?.currentOrganizationId) return;
+    
+    // すでにその日にシフトがあるかチェック
+    const existingShift = dayShifts.find(s => s.userId === userId);
+    if (existingShift) {
+      showErrorToast('このユーザーは既にこの日のシフトに含まれています');
+      return;
+    }
+    
+    // ユーザー情報を取得
+    const user = allOrgUsers.find(u => u.id === userId);
+    if (!user) return;
+    
+    // 仮のシフトデータを作成してモーダルで編集
+    const dayStart = new Date(selectedDay.getFullYear(), selectedDay.getMonth(), selectedDay.getDate(), 0, 0, 0, 0);
+    const tempShift: ShiftRow = {
+      id: 'temp-new-shift', // 仮ID
+      userId: userId,
+      userName: user.name,
+      avatarSeed: user.seed,
+      avatarBgColor: user.bgColor,
+      date: dayStart,
+      startTime: '09:00',
+      endTime: '18:00',
+      originalStartTime: '09:00',
+      originalEndTime: '18:00',
+      note: '',
+      status: 'pending',
+      hourlyWage: orgSettings?.defaultHourlyWage || 1100,
+    };
+    
+    // モーダルを開く
+    setEditingShift(tempShift);
+    setEditingShiftId('temp-new-shift');
+    setEditModalTime({ startTime: '09:00', endTime: '18:00' });
+    setIsAddingNewShift(true);
+    setShowAddUserModal(false);
+  };
+
   const bulkApproveDay = async () => {
     if (!userProfile?.uid || !selectedDay) return;
+    
+    // pendingとrejectedを分けて処理
+    const pendingShifts = dayShifts.filter(s => s.status === 'pending');
+    const rejectedShifts = dayShifts.filter(s => s.status === 'rejected');
+    
+    // 確認メッセージの構築
+    let confirmMessage = '';
+    if (pendingShifts.length > 0) {
+      confirmMessage += `${pendingShifts.length}件のシフトを承認します。\n`;
+    }
+    if (rejectedShifts.length > 0) {
+      confirmMessage += `${rejectedShifts.length}件の却下シフトを削除します。\n`;
+    }
+    
+    // 希望時間外チェック（pendingのみ）
+    const outOfRangeShifts: Array<{ shiftId: string; userName: string; original: string; modified: string }> = [];
+    for (const shift of pendingShifts) {
+      const edited = editedShifts.get(shift.id);
+      const currentStart = edited?.startTime || shift.startTime;
+      const currentEnd = edited?.endTime || shift.endTime;
+      const originalStart = shift.originalStartTime || shift.startTime;
+      const originalEnd = shift.originalEndTime || shift.endTime;
+      
+      // 希望時間外に延ばされているかチェック
+      if (currentStart < originalStart || currentEnd > originalEnd) {
+        outOfRangeShifts.push({
+          shiftId: shift.id,
+          userName: shift.userName,
+          original: `${originalStart}-${originalEnd}`,
+          modified: `${currentStart}-${currentEnd}`
+        });
+      }
+    }
+    
+    // 希望時間外のシフトがあれば追加警告
+    if (outOfRangeShifts.length > 0) {
+      confirmMessage += `\n以下のシフトが希望外の時間を含んでいます：\n${outOfRangeShifts.map(s => `${s.userName} (${s.original} → ${s.modified})`).join('\n')}`;
+    }
+    
+    if (confirmMessage) {
+      const confirmed = await showConfirmToast(confirmMessage + '\n\nこのまま確定してよろしいですか？', { confirmText: '確定', cancelText: 'キャンセル' });
+      if (!confirmed) {
+        setShowBulkApprovalConfirm(false);
+        return;
+      }
+    }
+    
     setBulkApproving(true);
     try {
       const approverRef = doc(db, 'users', userProfile.uid);
       const now = Timestamp.now();
       
-      // その日の未承認シフト（pending, rejected）を全て承認
-      const shiftsToApprove = dayShifts.filter(s => s.status !== 'approved');
-      
-      for (const shift of shiftsToApprove) {
-        await updateDoc(doc(db, 'shifts', shift.id), {
+      // pendingシフトを承認
+      for (const shift of pendingShifts) {
+        const edited = editedShifts.get(shift.id);
+        const updateData: any = {
           status: 'approved',
           approvedBy: approverRef,
           approvedAt: now,
           rejectReason: null,
-        } as any);
+        };
+        
+        // 編集された時間がある場合は一緒に保存
+        if (edited) {
+          updateData.startTime = edited.startTime;
+          updateData.endTime = edited.endTime;
+        }
+        
+        await updateDoc(doc(db, 'shifts', shift.id), updateData);
       }
       
+      // rejectedシフトを削除
+      for (const shift of rejectedShifts) {
+        await deleteDoc(doc(db, 'shifts', shift.id));
+      }
+      
+      // editedShiftsをクリア
+      const editedShiftsBeforeClear = new Map(editedShifts);
+      setEditedShifts(new Map());
+      
       // ローカルステートを更新
-      setShifts(prev => prev.map(s => {
-        const shouldApprove = shiftsToApprove.find(sa => sa.id === s.id);
-        if (shouldApprove) {
-          return { ...s, status: 'approved', approvedByName: userProfile.displayName || '', approvedAt: new Date(), rejectReason: null };
-        }
-        return s;
-      }));
+      setShifts(prev => {
+        const rejectedIds = rejectedShifts.map(s => s.id);
+        return prev
+          .filter(s => !rejectedIds.includes(s.id)) // 却下シフトを除外
+          .map(s => {
+            const shouldApprove = pendingShifts.find(ps => ps.id === s.id);
+            if (shouldApprove) {
+              const edited = editedShiftsBeforeClear.get(s.id);
+              return { 
+                ...s, 
+                status: 'approved', 
+                approvedByName: userProfile.displayName || '', 
+                approvedAt: new Date(), 
+                rejectReason: null,
+                startTime: edited?.startTime || s.startTime,
+                endTime: edited?.endTime || s.endTime,
+              };
+            }
+            return s;
+          });
+      });
       
       // dayShiftsも更新
       await fetchDayShifts(selectedDay);
       
       setShowBulkApprovalConfirm(false);
     } catch (e) {
-      alert('一括承認に失敗しました');
+      showErrorToast('一括承認に失敗しました');
       console.error(e);
     } finally {
       setBulkApproving(false);
@@ -1171,6 +1292,17 @@ export default function AdminShiftListPage() {
                           );
                           });
                         })()}
+                        
+                        {/* ユーザー追加ボタン */}
+                        <div className="flex items-center justify-center pt-4 border-t border-gray-200">
+                          <button
+                            onClick={() => setShowAddUserModal(true)}
+                            className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm"
+                          >
+                            <span className="text-xl">+</span>
+                            <span>スタッフを追加</span>
+                          </button>
+                        </div>
                       </div>
                           </div>
                         </div>
@@ -1180,6 +1312,65 @@ export default function AdminShiftListPage() {
                 </div>
               </div>
             )}
+
+        {/* ユーザー追加モーダル */}
+        {showAddUserModal && selectedDay && (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setShowAddUserModal(false)}>
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="px-6 py-4 border-b">
+                <h3 className="text-lg font-semibold">スタッフを追加</h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  {selectedDay.getFullYear()}年{selectedDay.getMonth() + 1}月{selectedDay.getDate()}日にシフトを追加
+                </p>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-6">
+                <div className="space-y-2">
+                  {(() => {
+                    // 既にシフトがあるユーザーのIDリスト
+                    const existingUserIds = dayShifts.map(s => s.userId);
+                    // まだシフトがないユーザーのみ表示
+                    const availableUsers = allOrgUsers.filter(u => !existingUserIds.includes(u.id));
+                    
+                    if (availableUsers.length === 0) {
+                      return (
+                        <div className="text-center py-8 text-gray-500">
+                          追加可能なスタッフがいません
+                        </div>
+                      );
+                    }
+                    
+                    return availableUsers.map(user => (
+                      <button
+                        key={user.id}
+                        onClick={() => addUserToDay(user.id)}
+                        disabled={addingUser}
+                        className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:bg-gray-50 hover:border-blue-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <img
+                          src={avatarUrl(user.seed || user.name, user.bgColor)}
+                          alt={user.name}
+                          className="w-10 h-10 rounded-full"
+                        />
+                        <span className="font-medium text-gray-900">{user.name}</span>
+                      </button>
+                    ));
+                  })()}
+                </div>
+              </div>
+              
+              <div className="px-6 py-4 border-t">
+                <button
+                  onClick={() => setShowAddUserModal(false)}
+                  disabled={addingUser}
+                  className="w-full px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium disabled:opacity-50"
+                >
+                  キャンセル
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 時間設定モーダル */}
         {showTimeSettings && (
@@ -1264,22 +1455,25 @@ export default function AdminShiftListPage() {
 
       {/* シフト編集・承認モーダル */}
       {editingShiftId && editingShift && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => { setEditingShiftId(null); setEditingShift(null); setTempLabelId(undefined); }}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => { setEditingShiftId(null); setEditingShift(null); setTempLabelId(undefined); setIsAddingNewShift(false); }}>
           <div className="bg-white rounded-lg p-6 w-[900px] max-w-[95vw]" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex items-start justify-between">
               <div className="flex-1">
-                <h3 className="text-lg font-semibold">シフト操作</h3>
+                <h3 className="text-lg font-semibold">{isAddingNewShift ? 'シフト追加' : 'シフト操作'}</h3>
                 <div className="mt-2 text-sm text-gray-600">
                   <div className="flex items-center gap-2 mb-1">
                     <img src={avatarUrl(editingShift.avatarSeed || editingShift.userName, editingShift.avatarBgColor)} alt={editingShift.userName} className="w-6 h-6 rounded-full ring-1 ring-gray-200" />
                     <span className="font-medium">{editingShift.userName}</span>
                   </div>
-                  <div>ステータス: <span className={`font-semibold ${editingShift.status === 'approved' ? 'text-green-600' : editingShift.status === 'rejected' ? 'text-red-600' : 'text-blue-600'}`}>
-                    {editingShift.status === 'approved' ? '承認済み' : editingShift.status === 'rejected' ? '却下' : '申請中'}
-                  </span></div>
+                  {!isAddingNewShift && (
+                    <div>ステータス: <span className={`font-semibold ${editingShift.status === 'approved' ? 'text-green-600' : editingShift.status === 'rejected' ? 'text-red-600' : 'text-blue-600'}`}>
+                      {editingShift.status === 'approved' ? '承認済み' : editingShift.status === 'rejected' ? '却下' : '申請中'}
+                    </span></div>
+                  )}
                 </div>
               </div>
               
+              {!isAddingNewShift && (
               <div className="flex gap-2 ml-4">
                 <button
                   disabled={editingShift.status === 'approved'}
@@ -1309,6 +1503,7 @@ export default function AdminShiftListPage() {
                   却下
                 </button>
               </div>
+              )}
             </div>
 
             {/* 左右分割レイアウト */}
@@ -1347,6 +1542,7 @@ export default function AdminShiftListPage() {
                   </div>
                 </div>
 
+                {!isAddingNewShift && (
                 <div>
                   <button
                     onClick={async () => {
@@ -1386,7 +1582,7 @@ export default function AdminShiftListPage() {
                           setSplitMode(false);
                         } catch (e) {
                           console.error('Label update failed', e);
-                          alert('役職の設定に失敗しました');
+                          showErrorToast('役職の設定に失敗しました');
                         }
                       }
                     }}
@@ -1400,6 +1596,7 @@ export default function AdminShiftListPage() {
                     役職確定
                   </button>
                 </div>
+                )}
                 </div>
               </div>
 
@@ -1449,7 +1646,7 @@ export default function AdminShiftListPage() {
                                   key={label.id}
                                   onClick={async () => {
                                     if (!splitTime || splitTime <= editModalTime.startTime || splitTime >= editModalTime.endTime) {
-                                      alert('有効な分割時刻を入力してください');
+                                      showErrorToast('有効な分割時刻を入力してください');
                                       return;
                                     }
                                     
@@ -1538,18 +1735,51 @@ export default function AdminShiftListPage() {
 
                 <div className="pt-2">
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       if (editModalTime.startTime && editModalTime.endTime) {
-                        setEditedShifts(prev => new Map(prev).set(editingShiftId, editModalTime));
-                        setEditingShiftId(null);
-                        setEditingShift(null);
+                        if (isAddingNewShift) {
+                          // 新規シフトを作成
+                          try {
+                            const dayStart = new Date(editingShift.date.getFullYear(), editingShift.date.getMonth(), editingShift.date.getDate(), 0, 0, 0, 0);
+                            const shiftData = {
+                              uid: editingShift.userId,
+                              organizationId: userProfile!.currentOrganizationId,
+                              date: Timestamp.fromDate(dayStart),
+                              startTime: editModalTime.startTime,
+                              endTime: editModalTime.endTime,
+                              originalStartTime: editModalTime.startTime,
+                              originalEndTime: editModalTime.endTime,
+                              note: '',
+                              status: 'pending',
+                              hourlyWage: orgSettings?.defaultHourlyWage || 1100,
+                              labelId: tempLabelId === undefined ? null : tempLabelId,
+                              createdAt: Timestamp.now(),
+                              updatedAt: Timestamp.now(),
+                            };
+                            
+                            await addDoc(collection(db, 'shifts'), shiftData);
+                            await fetchDayShifts(selectedDay!);
+                            setEditingShiftId(null);
+                            setEditingShift(null);
+                            setIsAddingNewShift(false);
+                            setTempLabelId(undefined);
+                          } catch (e) {
+                            console.error('シフト追加エラー:', e);
+                            showErrorToast('シフトの追加に失敗しました');
+                          }
+                        } else {
+                          // 既存シフトを編集
+                          setEditedShifts(prev => new Map(prev).set(editingShiftId, editModalTime));
+                          setEditingShiftId(null);
+                          setEditingShift(null);
+                        }
                       } else {
-                        alert('開始時刻と終了時刻を入力してください');
+                        showErrorToast('開始時刻と終了時刻を入力してください');
                       }
                     }}
                     className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold"
                   >
-                    時間を変更
+                    {isAddingNewShift ? 'シフトを追加' : '時間を変更'}
                   </button>
                 </div>
                 </div>
@@ -1559,7 +1789,7 @@ export default function AdminShiftListPage() {
             {/* キャンセルボタン（モーダル下部中央） */}
             <div className="mt-4 flex justify-center">
               <button
-                onClick={() => { setEditingShiftId(null); setEditingShift(null); setSplitMode(false); setTempLabelId(undefined); }}
+                onClick={() => { setEditingShiftId(null); setEditingShift(null); setSplitMode(false); setTempLabelId(undefined); setIsAddingNewShift(false); }}
                 className="px-6 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
               >
                 キャンセル
@@ -1593,29 +1823,25 @@ export default function AdminShiftListPage() {
                   </button>
                   <button
                     onClick={async () => {
-                      setConfirmModal({
-                        isOpen: true,
-                        type: 'deleteLabel',
-                        message: `「${label.name}」を削除しますか？`,
-                        onConfirm: async () => {
-                          const updatedLabels = shiftLabels.filter(l => l.id !== label.id);
-                          setShiftLabels(updatedLabels);
-                          // Firestoreに保存
-                          if (userProfile?.currentOrganizationId) {
-                            try {
-                              await updateDoc(doc(db, 'organizations', userProfile.currentOrganizationId), {
-                                shiftLabels: updatedLabels
-                              });
-                            } catch (e) {
-                              console.error('ラベルの削除に失敗:', e);
-                            }
-                          }
-                          // 選択中の日付のシフトを再読み込みして表示を更新
-                          if (selectedDay) {
-                            fetchDayShifts(selectedDay);
-                          }
+                      const confirmed = await showConfirmToast(`「${label.name}」を削除しますか？`, { confirmText: '削除', cancelText: 'キャンセル' });
+                      if (!confirmed) return;
+                      
+                      const updatedLabels = shiftLabels.filter(l => l.id !== label.id);
+                      setShiftLabels(updatedLabels);
+                      // Firestoreに保存
+                      if (userProfile?.currentOrganizationId) {
+                        try {
+                          await updateDoc(doc(db, 'organizations', userProfile.currentOrganizationId), {
+                            shiftLabels: updatedLabels
+                          });
+                        } catch (e) {
+                          console.error('ラベルの削除に失敗:', e);
                         }
-                      });
+                      }
+                      // 選択中の日付のシフトを再読み込みして表示を更新
+                      if (selectedDay) {
+                        fetchDayShifts(selectedDay);
+                      }
                     }}
                     className="px-3 py-1 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded"
                   >
@@ -1669,7 +1895,7 @@ export default function AdminShiftListPage() {
                   <button
                     onClick={async () => {
                       if (!editingLabelName.trim()) {
-                        alert('名称を入力してください');
+                        showErrorToast('名称を入力してください');
                         return;
                       }
                       
@@ -1729,20 +1955,6 @@ export default function AdminShiftListPage() {
           </div>
         </div>
       )}
-      
-      <ConfirmModal
-        isOpen={confirmModal.isOpen}
-        onClose={() => setConfirmModal({ isOpen: false, type: 'approve', message: '', onConfirm: () => {} })}
-        onConfirm={() => {
-          confirmModal.onConfirm();
-          setConfirmModal({ isOpen: false, type: 'approve', message: '', onConfirm: () => {} });
-        }}
-        title={confirmModal.type === 'approve' ? 'シフト承認' : 'ラベル削除'}
-        message={confirmModal.message}
-        confirmText={confirmModal.type === 'approve' ? '承認' : '削除'}
-        cancelText="キャンセル"
-        variant={confirmModal.type === 'approve' ? 'info' : 'danger'}
-      />
       </div>
     </div>
   );
