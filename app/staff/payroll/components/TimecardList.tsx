@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { GroupedTimecard, OrgSettings } from '../types';
+import { GroupedTimecard, OrgSettings } from '@/lib/payroll';
 import { TimecardItem } from './TimecardItem';
 
 interface TimecardListProps {

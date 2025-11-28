@@ -1,6 +1,6 @@
 import { Timestamp } from 'firebase/firestore';
 import JapaneseHolidays from 'japanese-holidays';
-import { BreakPeriod, TimecardRow, OrgSettings, PayrollBreakdown, PayrollSummary, GroupedTimecard, ChartDataItem } from '../types';
+import { BreakPeriod, TimecardRow, OrgSettings, PayrollBreakdown, PayrollSummary, GroupedTimecard, ChartDataItem } from './types';
 
 // タイムスタンプ間の分数計算
 export const minutesBetweenTimestamps = (start?: Timestamp, end?: Timestamp): number => {
@@ -20,43 +20,69 @@ export const calcTotalBreakMinutes = (breaks: BreakPeriod[]): number => {
   return total;
 };
 
-// 深夜時間の計算
+// 特定の時刻が休憩中かどうかを判定
+const isInBreak = (time: Date, breaks: BreakPeriod[]): boolean => {
+  const timeMs = time.getTime();
+  for (const b of breaks) {
+    if (b.startAt && b.endAt) {
+      const breakStart = b.startAt.toMillis();
+      const breakEnd = b.endAt.toMillis();
+      if (timeMs >= breakStart && timeMs < breakEnd) {
+        return true;
+      }
+    }
+  }
+  return false;
+};
+
+// 深夜時間の計算（休憩時間を除外）
 export const calcNightMinutes = (
   clockIn?: Timestamp,
   clockOut?: Timestamp,
   nightStart?: string,
-  nightEnd?: string
+  nightEnd?: string,
+  breaks?: BreakPeriod[]
 ): number => {
   if (!clockIn || !clockOut || !nightStart || !nightEnd) return 0;
   const start = clockIn.toDate();
   const end = clockOut.toDate();
   const [nsH, nsM] = nightStart.split(':').map(Number);
   const [neH, neM] = nightEnd.split(':').map(Number);
+  const breakList = breaks || [];
   let total = 0;
   let cur = new Date(start);
   while (cur < end) {
-    const h = cur.getHours();
-    const m = cur.getMinutes();
-    const dayMin = h * 60 + m;
-    const nsMin = nsH * 60 + nsM;
-    const neMin = neH * 60 + neM;
-    let isNight = false;
-    if (nsMin <= neMin) {
-      isNight = dayMin >= nsMin && dayMin < neMin;
-    } else {
-      isNight = dayMin >= nsMin || dayMin < neMin;
+    // 休憩中は深夜時間にカウントしない
+    if (!isInBreak(cur, breakList)) {
+      const h = cur.getHours();
+      const m = cur.getMinutes();
+      const dayMin = h * 60 + m;
+      const nsMin = nsH * 60 + nsM;
+      const neMin = neH * 60 + neM;
+      let isNight = false;
+      if (nsMin <= neMin) {
+        isNight = dayMin >= nsMin && dayMin < neMin;
+      } else {
+        isNight = dayMin >= nsMin || dayMin < neMin;
+      }
+      if (isNight) total++;
     }
-    if (isNight) total++;
     cur = new Date(cur.getTime() + 60000);
   }
   return total;
 };
 
+// 週末判定
+export const isWeekend = (d: Date): boolean => d.getDay() === 0 || d.getDay() === 6;
+
+// 祝日判定
+export const isHoliday = (d: Date): boolean => !!JapaneseHolidays.isHoliday(d);
+
 // タイムカード1件の内訳計算（交通費はシフト単位では含めない）
 export const calcBreakdown = (
   row: TimecardRow,
   orgSettings: OrgSettings | null,
-  _transportPerShift: number // 使用しない（日単位で計算するため）
+  _transportPerShift?: number // 使用しない（日単位で計算するため）
 ): PayrollBreakdown => {
   const hourly = row.hourlyWage ?? orgSettings?.defaultHourlyWage ?? 1100;
   const grossMin = minutesBetweenTimestamps(row.clockInAt, row.clockOutAt);
@@ -66,7 +92,7 @@ export const calcBreakdown = (
   const base = hourly * totalH;
 
   const nightMin = orgSettings?.nightPremiumEnabled
-    ? calcNightMinutes(row.clockInAt, row.clockOutAt, orgSettings.nightStart, orgSettings.nightEnd)
+    ? calcNightMinutes(row.clockInAt, row.clockOutAt, orgSettings.nightStart, orgSettings.nightEnd, row.breaks)
     : 0;
   const night = orgSettings?.nightPremiumEnabled
     ? hourly * (nightMin / 60) * (orgSettings.nightPremiumRate ?? 0)
@@ -79,8 +105,6 @@ export const calcBreakdown = (
     ? hourly * (overtimeMin / 60) * (orgSettings.overtimePremiumRate ?? 0)
     : 0;
 
-  const isWeekend = (d: Date) => d.getDay() === 0 || d.getDay() === 6;
-  const isHoliday = (d: Date) => !!JapaneseHolidays.isHoliday(d);
   const isHol = !!orgSettings?.holidayPremiumEnabled &&
     ((orgSettings?.holidayIncludesWeekend && isWeekend(row.date)) || isHoliday(row.date));
   const holiday = isHol ? hourly * totalH * (orgSettings?.holidayPremiumRate ?? 0) : 0;
@@ -229,74 +253,93 @@ export const getCompletedDraftCards = (timecards: TimecardRow[]): TimecardRow[] 
   );
 };
 
-// 時刻フォーマット
-export const formatTime = (ts?: Timestamp): string => {
-  return ts ? ts.toDate().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '--:--';
-};
-
-// 曜日を取得
-export const getDayOfWeek = (date: Date): string => {
-  return ['日', '月', '火', '水', '木', '金', '土'][date.getDay()];
-};
-
-// 曜日の色を取得
-export const getDayOfWeekColor = (date: Date): string => {
-  const day = date.getDay();
-  const holiday = JapaneseHolidays.isHoliday(date);
-  if (holiday || day === 0) return 'text-red-600';
-  if (day === 6) return 'text-blue-600';
-  return 'text-gray-900';
-};
-
-// グラフバーの色を取得
-export const getBarColor = (status: string): string => {
-  switch (status) {
-    case 'approved': return '#10b981';
-    case 'pending': return '#f59e0b';
-    case 'rejected': return '#ef4444';
-    default: return '#9ca3af';
-  }
-};
-
-// CSV出力
-export const exportPayrollCsv = (
+// ユーザーごとに集計（company/payroll用）
+export const aggregateByUser = (
   timecards: TimecardRow[],
   orgSettings: OrgSettings | null,
-  transportPerShift: number,
-  selectedMonth: Date
-): void => {
-  const header = ['日付', '出勤', '退勤', '休憩(分)', '時間(分)', '夜間(分)', '残業(分)', '時給', '基本(円)', '深夜(円)', '残業(円)', '休日(円)', '交通費(円)', '合計(円)'];
-  const lines = [header.join(',')];
+  memberTransport: Record<string, number>,
+  userInfoMap: Record<string, { name: string; seed?: string; bgColor?: string }>,
+  getAvatarUrl: (seed: string, bgColor?: string) => string
+) => {
+  const map = new Map<string, {
+    userId: string;
+    userName: string;
+    avatarUrl: string;
+    timecards: TimecardRow[];
+    workDays: number;
+    totalMinutes: number;
+    breakMinutes: number;
+    nightMinutes: number;
+    overtimeMinutes: number;
+    base: number;
+    night: number;
+    overtime: number;
+    holiday: number;
+    transport: number;
+    total: number;
+    uniqueDates: Set<string>;
+  }>();
 
-  timecards.forEach(tc => {
-    const bd = calcBreakdown(tc, orgSettings, transportPerShift);
-    const hourly = tc.hourlyWage ?? orgSettings?.defaultHourlyWage ?? 1100;
-    lines.push([
-      tc.dateKey,
-      formatTime(tc.clockInAt),
-      formatTime(tc.clockOutAt),
-      String(bd.breakMin || 0),
-      String(bd.totalMin),
-      String(bd.nightMin),
-      String(bd.overtimeMin),
-      String(hourly),
-      String(Math.round(bd.base)),
-      String(Math.round(bd.night)),
-      String(Math.round(bd.overtime)),
-      String(Math.round(bd.holiday)),
-      String(Math.round(bd.transport)),
-      String(bd.total),
-    ].join(','));
-  });
+  for (const tc of timecards) {
+    const userId = tc.userId || '';
+    if (!map.has(userId)) {
+      const info = userInfoMap[userId] || { name: userId };
+      const seed = info.seed || info.name || userId;
+      const bgColor = info.bgColor;
 
-  const csv = '\ufeff' + lines.join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  const y = selectedMonth.getFullYear();
-  const m = selectedMonth.getMonth() + 1;
-  a.download = `my_payroll_${y}-${String(m).padStart(2, '0')}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+      map.set(userId, {
+        userId,
+        userName: info.name,
+        avatarUrl: getAvatarUrl(seed, bgColor),
+        timecards: [],
+        workDays: 0,
+        totalMinutes: 0,
+        breakMinutes: 0,
+        nightMinutes: 0,
+        overtimeMinutes: 0,
+        base: 0,
+        night: 0,
+        overtime: 0,
+        holiday: 0,
+        transport: 0,
+        total: 0,
+        uniqueDates: new Set<string>(),
+      });
+    }
+
+    const app = map.get(userId)!;
+    app.timecards.push(tc);
+    app.uniqueDates.add(tc.dateKey);
+
+    const bd = calcBreakdown(tc, orgSettings);
+    app.totalMinutes += bd.totalMin;
+    app.breakMinutes += bd.breakMin;
+    app.nightMinutes += bd.nightMin;
+    app.overtimeMinutes += bd.overtimeMin;
+    app.base += bd.base;
+    app.night += bd.night;
+    app.overtime += bd.overtime;
+    app.holiday += bd.holiday;
+  }
+
+  // 交通費を日数ベースで計算し、合計を更新
+  const result: Array<Omit<typeof map extends Map<string, infer V> ? V : never, 'uniqueDates'>> = [];
+  for (const [userId, app] of map) {
+    app.workDays = app.uniqueDates.size;
+
+    // 交通費 = 出勤日数 × 1日あたりの交通費
+    const transportPerDay = orgSettings?.transportAllowanceEnabled
+      ? (memberTransport[userId] ?? orgSettings.transportAllowancePerShift ?? 0)
+      : 0;
+    app.transport = app.workDays * transportPerDay;
+
+    // 合計を再計算
+    app.total = Math.round(app.base + app.night + app.overtime + app.holiday + app.transport);
+
+    // uniqueDatesは返さない
+    const { uniqueDates, ...userApp } = app;
+    result.push(userApp);
+  }
+
+  return result.sort((a, b) => a.userName.localeCompare(b.userName));
 };

@@ -22,7 +22,7 @@ export const PayrollHeader = ({
   return (
     <>
       {/* タイトルヘッダー */}
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="mb-6 flex items-center justify-between">
         <h1 className="text-xl sm:text-2xl font-bold">給与明細</h1>
         <button
           onClick={onBack}

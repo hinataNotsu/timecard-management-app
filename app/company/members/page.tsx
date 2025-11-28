@@ -268,7 +268,14 @@ export default function OrganizationMembersPage() {
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl font-bold">メンバー管理</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold">メンバー管理</h1>
+            {!loading && (
+              <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
+                {rows.length}名
+              </span>
+            )}
+          </div>
           <button onClick={() => router.push('/company/dashboard')} className="text-sm text-gray-600 hover:text-gray-900">← ダッシュボード</button>
         </div>
 

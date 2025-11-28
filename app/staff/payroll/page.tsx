@@ -6,7 +6,6 @@ import { usePayrollData } from './hooks/usePayrollData';
 import { exportPayrollCsv } from './utils/payrollCalculations';
 import {
   PayrollHeader,
-  MonthlyReportStatus,
   PayrollSummary,
   PayrollChart,
   TimecardList,
@@ -25,7 +24,6 @@ export default function PartTimePayrollPage() {
     timecards,
     orgSettings,
     transportPerShift,
-    monthlyReport,
     summary,
     groupedTimecards,
     chartData,
@@ -100,8 +98,6 @@ export default function PartTimePayrollPage() {
           draftCount={completedDraftCards.length}
           onBack={handleBack}
         />
-
-        <MonthlyReportStatus monthlyReport={monthlyReport} />
 
         <PayrollSummary summary={summary} />
 
