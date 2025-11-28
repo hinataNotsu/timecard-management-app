@@ -1,5 +1,5 @@
 // 共通型をlib/payrollから再エクスポート
-export {
+export type {
   BreakPeriod,
   TimecardRow,
   MonthlyReport,
