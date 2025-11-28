@@ -1,8 +1,6 @@
 'use client';
 
-import { GroupedTimecard, OrgSettings } from '../types';
-import { StatusBadge } from './StatusBadge';
-import { formatTime, getDayOfWeek, getDayOfWeekColor, calcBreakdown } from '../utils/payrollCalculations';
+import { GroupedTimecard, OrgSettings, calcBreakdown, formatTime, getDayOfWeek, getDayOfWeekColor, statusStyles, statusLabels } from '@/lib/payroll';
 
 interface TimecardItemProps {
   group: GroupedTimecard;
@@ -11,6 +9,15 @@ interface TimecardItemProps {
   orgSettings: OrgSettings | null;
   transportPerShift: number;
 }
+
+// ステータスバッジ
+const StatusBadge = ({ status }: { status: string }) => {
+  return (
+    <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusStyles[status] || 'bg-gray-100'}`}>
+      {statusLabels[status] || status}
+    </span>
+  );
+};
 
 export const TimecardItem = ({
   group,
@@ -69,7 +76,7 @@ export const TimecardItem = ({
 
       {/* 展開時の詳細 */}
       {isExpanded && (
-        <div className="px-4 pb-4 pt-0 border-t border-gray-100">
+        <div className="px-3 pb-3 pt-0 border-t border-gray-100">
           {timecards.map((tc, index) => {
             const bd = calcBreakdown(tc, orgSettings, transportPerShift);
             const isLast = index === timecards.length - 1;
@@ -77,11 +84,11 @@ export const TimecardItem = ({
             return (
               <div
                 key={tc.id}
-                className={`bg-gray-50 rounded-lg p-4 mt-3 ${!isLast ? 'mb-2' : ''}`}
+                className={`bg-gray-50 rounded-lg p-3 mt-2 ${!isLast ? 'mb-1' : ''}`}
               >
                 {/* 複数シフトの場合はシフト番号を表示 */}
                 {hasMultiple && (
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-gray-700">
                       シフト {index + 1}
                     </span>
@@ -89,47 +96,75 @@ export const TimecardItem = ({
                   </div>
                 )}
 
-                {/* 勤務情報 */}
-                <div className="grid grid-cols-2 gap-3 text-sm mb-4">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">出勤</span>
-                    <span className="font-medium">{formatTime(tc.clockInAt)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">退勤</span>
-                    <span className="font-medium">{formatTime(tc.clockOutAt)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">休憩</span>
-                    <span className="font-medium">{bd.breakMin}分</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">勤務時間</span>
-                    <span className="font-medium">{bd.totalMin}分 ({(bd.totalMin / 60).toFixed(1)}h)</span>
-                  </div>
-                  {bd.nightMin > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">深夜時間</span>
-                      <span className="font-medium">{bd.nightMin}分</span>
+                {/* タイムライン形式の勤務情報 */}
+                <div className="mb-3">
+                  {/* 出勤〜退勤のタイムライン */}
+                  <div className="flex items-center gap-2 mb-2">
+                    {/* 出勤 */}
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                      <div>
+                        <div className="text-lg font-bold text-gray-900">{formatTime(tc.clockInAt)}</div>
+                        <div className="text-xs text-gray-500">出勤</div>
+                      </div>
                     </div>
-                  )}
-                  {bd.overtimeMin > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">残業時間</span>
-                      <span className="font-medium">{bd.overtimeMin}分</span>
+                    
+                    {/* 矢印ライン */}
+                    <div className="flex-1 flex items-center px-1">
+                      <div className="flex-1 h-0.5 bg-gradient-to-r from-green-400 to-red-400"></div>
+                      <svg className="w-3 h-3 text-red-400 -ml-0.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
                     </div>
-                  )}
+                    
+                    {/* 退勤 */}
+                    <div className="flex items-center gap-1.5">
+                      <div>
+                        <div className="text-lg font-bold text-gray-900">{formatTime(tc.clockOutAt)}</div>
+                        <div className="text-xs text-gray-500">退勤</div>
+                      </div>
+                      <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                    </div>
+                  </div>
+                  
+                  {/* 勤務時間サマリー（休憩含む） */}
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <div className="flex items-center gap-1 bg-blue-50 text-blue-700 px-2 py-1 rounded-full">
+                      <span>⏱️</span>
+                      <span className="font-semibold">実働 {(bd.totalMin / 60).toFixed(1)}h</span>
+                    </div>
+                    {bd.breakMin > 0 && (
+                      <div className="flex items-center gap-1 bg-amber-50 text-amber-700 px-2 py-1 rounded-full">
+                        <span>☕</span>
+                        <span>休憩 {bd.breakMin}分</span>
+                      </div>
+                    )}
+                    {bd.nightMin > 0 && (
+                      <div className="flex items-center gap-1 bg-indigo-50 text-indigo-700 px-2 py-1 rounded-full">
+                        <span>🌙</span>
+                        <span>深夜 {bd.nightMin}分</span>
+                      </div>
+                    )}
+                    {bd.overtimeMin > 0 && (
+                      <div className="flex items-center gap-1 bg-orange-50 text-orange-700 px-2 py-1 rounded-full">
+                        <span>⚡</span>
+                        <span>残業 {bd.overtimeMin}分</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* 区切り線 */}
-                <div className="border-t border-gray-200 my-3"></div>
+                <div className="border-t border-gray-200 my-2"></div>
 
                 {/* 給与内訳 */}
                 <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">時給</span>
-                    <span className="font-medium">¥{bd.hourly.toLocaleString()}</span>
-                  </div>
+                  {transportPerShift > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">交通費</span>
+                      <span className="font-medium">¥{transportPerShift.toLocaleString()}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="text-gray-600">基本給</span>
                     <span className="font-medium">¥{Math.round(bd.base).toLocaleString()}</span>
@@ -150,12 +185,6 @@ export const TimecardItem = ({
                     <div className="flex justify-between">
                       <span className="text-gray-600">休日手当</span>
                       <span className="font-medium">¥{Math.round(bd.holiday).toLocaleString()}</span>
-                    </div>
-                  )}
-                  {bd.transport > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">交通費</span>
-                      <span className="font-medium">¥{Math.round(bd.transport).toLocaleString()}</span>
                     </div>
                   )}
 
@@ -182,6 +211,12 @@ export const TimecardItem = ({
                 <span>合計勤務時間</span>
                 <span>{(totalBreakdown.totalMin / 60).toFixed(1)}h</span>
               </div>
+              {totalBreakdown.transport > 0 && (
+                <div className="flex justify-between text-sm text-blue-700 mt-1">
+                  <span>交通費</span>
+                  <span>¥{totalBreakdown.transport.toLocaleString()}</span>
+                </div>
+              )}
             </div>
           )}
         </div>

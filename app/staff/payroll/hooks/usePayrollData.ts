@@ -1,16 +1,25 @@
+'use client';
+
 import { useEffect, useState, useMemo } from 'react';
 import { collection, doc, getDoc, getDocs, query, where, Timestamp, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/Toast';
-import { TimecardRow, MonthlyReport, OrgSettings, GroupedTimecard, PayrollSummary, ChartDataItem } from '../types';
 import {
+  TimecardRow,
+  MonthlyReport,
+  OrgSettings,
+  GroupedTimecard,
+  PayrollSummary,
+  ChartDataItem,
   calcSummary,
   groupTimecardsByDate,
   generateChartData,
   getCompletedDraftCards,
-  isBreakComplete
-} from '../utils/payrollCalculations';
+  isBreakComplete,
+  getMonthDateKeyRange,
+  dateKeyToDate,
+} from '@/lib/payroll';
 
 export const usePayrollData = (selectedMonth: Date) => {
   const { userProfile } = useAuth();
@@ -61,8 +70,8 @@ export const usePayrollData = (selectedMonth: Date) => {
           const memSnap = await getDoc(memRef);
           if (memSnap.exists()) {
             const mdata = memSnap.data() as any;
-            if (mdata.transportAllowance !== undefined) {
-              setTransportPerShift(Number(mdata.transportAllowance));
+            if (mdata.transportAllowancePerShift !== undefined) {
+              setTransportPerShift(Number(mdata.transportAllowancePerShift));
             }
           }
         } catch (e) {
@@ -70,10 +79,7 @@ export const usePayrollData = (selectedMonth: Date) => {
         }
 
         // タイムカード取得
-        const y = selectedMonth.getFullYear();
-        const m = selectedMonth.getMonth();
-        const startKey = `${y}-${String(m + 1).padStart(2, '0')}-01`;
-        const endKey = `${m === 11 ? y + 1 : y}-${String(m === 11 ? 1 : m + 2).padStart(2, '0')}-01`;
+        const { startKey, endKey } = getMonthDateKeyRange(selectedMonth);
 
         const qy = query(
           collection(db, 'timecards'),
@@ -88,11 +94,10 @@ export const usePayrollData = (selectedMonth: Date) => {
 
         for (const d of snap.docs) {
           const data = d.data() as any;
-          const [dy, dm, dd] = data.dateKey.split('-').map(Number);
           rows.push({
             id: d.id,
             dateKey: data.dateKey,
-            date: new Date(dy, dm - 1, dd),
+            date: dateKeyToDate(data.dateKey),
             clockInAt: data.clockInAt,
             breaks: data.breaks || [],
             clockOutAt: data.clockOutAt,
@@ -106,7 +111,9 @@ export const usePayrollData = (selectedMonth: Date) => {
 
         // 月次レポートの状態を取得
         try {
-          const reportId = `${userProfile.currentOrganizationId}_${y}-${String(m + 1).padStart(2, '0')}_${userProfile.uid}`;
+          const y = selectedMonth.getFullYear();
+          const m = selectedMonth.getMonth() + 1;
+          const reportId = `${userProfile.currentOrganizationId}_${y}-${String(m).padStart(2, '0')}_${userProfile.uid}`;
           const reportSnap = await getDoc(doc(db, 'monthlyReports', reportId));
           if (reportSnap.exists()) {
             setMonthlyReport(reportSnap.data() as MonthlyReport);

@@ -203,26 +203,6 @@ export default function CompanyDashboard() {
             </button>
           </div>
         </div>
-
-        {/* 統計情報 */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-white rounded-lg shadow p-4">
-            <p className="text-sm text-gray-600 mb-1">登録スタッフ数</p>
-            <p className="text-2xl font-bold text-gray-900">{staffCount}名</p>
-          </div>
-          <div className="bg-white rounded-lg shadow p-4">
-            <p className="text-sm text-gray-600 mb-1">今月のシフト</p>
-            <p className="text-2xl font-bold text-gray-900">0件</p>
-          </div>
-          <div className="bg-white rounded-lg shadow p-4">
-            <p className="text-sm text-gray-600 mb-1">今月の総労働時間</p>
-            <p className="text-2xl font-bold text-gray-900">0時間</p>
-          </div>
-          <div className="bg-white rounded-lg shadow p-4">
-            <p className="text-sm text-gray-600 mb-1">今月の給与総額</p>
-            <p className="text-2xl font-bold text-gray-900">¥0</p>
-          </div>
-        </div>
       </main>
     </div>
   );
