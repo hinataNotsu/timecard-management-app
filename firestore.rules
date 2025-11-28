@@ -147,28 +147,35 @@ service cloud.firestore {
       // 読み取り: ログイン済み & 同じ組織のメンバー & 削除済みでない & 組織内で退職済みでない
       allow read: if signedIn() && isNotDeleted() && isMember(resource.data.organizationId) && isNotRetiredInOrg(resource.data.organizationId);
 
-      // 作成: ログイン済み & 所属組織のシフト & (自分のuserRef or 管理者) & 削除済みでない & 組織内で退職済みでない
-      // デバッグ用に条件を分けて記述
+      // 作成: ログイン済み & 所属組織のシフト & (自分のuid or 管理者) & 削除済みでない & 組織内で退職済みでない
+      // uidフィールドまたはuserRefフィールドに対応
       allow create: if signedIn() &&
               isNotDeleted() &&
               isMember(request.resource.data.organizationId) &&
               isNotRetiredInOrg(request.resource.data.organizationId) &&
               (
-                request.resource.data.userRef == /databases/$(database)/documents/users/$(request.auth.uid) ||
+                ('uid' in request.resource.data && request.resource.data.uid == request.auth.uid) ||
+                ('userRef' in request.resource.data && request.resource.data.userRef == /databases/$(database)/documents/users/$(request.auth.uid)) ||
                 isManage()
               ) &&
               submissionAllowed(request.resource.data.organizationId, request.resource.data.date);
 
       // 更新:
       // - 管理者: 同一組織内なら更新可（承認/却下操作を想定）& 削除済みでない
-      // - 本人: statusがpendingの間のみ、かつstatus/organizationId/userRefを変更不可 & 削除済みでない
+      // - 本人: statusがpendingの間のみ、かつstatus/organizationId/uidを変更不可 & 削除済みでない
       allow update: if signedIn() && isNotDeleted() && isMember(resource.data.organizationId) && (
                       isManage() || (
-                        resource.data.userRef == /databases/$(database)/documents/users/$(request.auth.uid) &&
+                        (
+                          ('uid' in resource.data && resource.data.uid == request.auth.uid) ||
+                          ('userRef' in resource.data && resource.data.userRef == /databases/$(database)/documents/users/$(request.auth.uid))
+                        ) &&
                         (!('status' in resource.data) || resource.data.status == 'pending') &&
                         request.resource.data.status == resource.data.status &&
                         request.resource.data.organizationId == resource.data.organizationId &&
-                        request.resource.data.userRef == resource.data.userRef &&
+                        (
+                          ('uid' in request.resource.data && 'uid' in resource.data && request.resource.data.uid == resource.data.uid) ||
+                          ('userRef' in request.resource.data && 'userRef' in resource.data && request.resource.data.userRef == resource.data.userRef)
+                        ) &&
                         submissionAllowed(resource.data.organizationId, request.resource.data.date)
                       )
                     );
@@ -176,7 +183,10 @@ service cloud.firestore {
       // 削除: 管理者は可。本人はstatusがpendingのときのみ可（未設定はpending扱い）& 削除済みでない
       allow delete: if signedIn() && isNotDeleted() && isMember(resource.data.organizationId) && (
                       isManage() || (
-                        resource.data.userRef == /databases/$(database)/documents/users/$(request.auth.uid) &&
+                        (
+                          ('uid' in resource.data && resource.data.uid == request.auth.uid) ||
+                          ('userRef' in resource.data && resource.data.userRef == /databases/$(database)/documents/users/$(request.auth.uid))
+                        ) &&
                         (!('status' in resource.data) || resource.data.status == 'pending') &&
                         submissionAllowed(resource.data.organizationId, resource.data.date)
                       )

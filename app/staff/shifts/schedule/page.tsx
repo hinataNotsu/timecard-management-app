@@ -127,8 +127,17 @@ export default function ApprovedSchedulePage() {
         for (const d of snap.docs) {
           const data = d.data() as any;
           const dateTs: Timestamp = data.date as Timestamp;
-          const userRefPath: string = data.userRef?.path || '';
-          const userId = userRefPath.split('/').pop();
+          
+          // ユーザーIDの取得（複数のフィールド形式に対応）
+          let userId: string | undefined;
+          if (data.uid) {
+            userId = data.uid;
+          } else if (data.userId) {
+            userId = data.userId;
+          } else if (data.userRef?.path) {
+            userId = data.userRef.path.split('/').pop();
+          }
+          
           if (!userId) continue;
           const { name: userName, seed: avatarSeed, bgColor: avatarBgColor } = await getUserInfo(userId);
           
